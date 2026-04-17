@@ -1249,7 +1249,8 @@
             try {
                 const response = await fetch(API_BASE + endpoint, options);
 
-                if (response.status === 401) {
+                // Don't auto-logout on 401 for login endpoint
+                if (response.status === 401 && !endpoint.includes('/auth/login')) {
                     logout();
                     return null;
                 }
@@ -1257,7 +1258,7 @@
                 const data = await response.json();
 
                 if (!response.ok) {
-                    throw new Error(data.message || 'API error');
+                    throw new Error(data.error || data.message || 'API error');
                 }
 
                 return data;
@@ -1311,7 +1312,7 @@
 
             const user = await apiCall('/auth/me');
             if (user) {
-                state.user = user.data;
+                state.user = user.admin || user.data;
                 showApp();
                 loadDashboard();
                 updateAdminInfo();
@@ -1361,10 +1362,10 @@
             const password = document.getElementById('loginPassword').value;
 
             const result = await apiCall('/auth/login', 'POST', { username, password });
-            if (result) {
+            if (result && result.token) {
                 state.token = result.token;
                 localStorage.setItem('admin_token', state.token);
-                state.user = result.user;
+                state.user = result.admin || result.user;
                 showApp();
                 updateAdminInfo();
                 updateMenuVisibility();
