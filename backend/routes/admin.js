@@ -907,11 +907,81 @@ router.put('/settings', adminAuthMiddleware('super_admin'), async (req, res) => 
 });
 
 /**
+ * POST /api/admin/fix-user-names
+ * Re-resolve names from Paystack for already-verified users whose names
+ * weren't populated (e.g., verified before the name-population code was deployed).
+ *
+ * Body: { userId?: string } — if provided, fix only that user. Otherwise fix all.
+ */
+router.post('/fix-user-names', adminAuthMiddleware(), async (req, res) => {
+    try {
+        const { verifyOnboarding } = require('../services/gravyApi');
+        const { userId } = req.body;
+
+        let usersToFix;
+        if (userId) {
+            usersToFix = await pool.query(
+                `SELECT id, gravy_account_number, first_name, last_name
+                 FROM users WHERE id = $1 AND is_onboarded = TRUE AND gravy_account_number IS NOT NULL`,
+                [userId]
+            );
+        } else {
+            // Fix all verified users — re-resolve their names from Paystack
+            usersToFix = await pool.query(
+                `SELECT id, gravy_account_number, first_name, last_name
+                 FROM users WHERE is_onboarded = TRUE AND gravy_account_number IS NOT NULL`
+            );
+        }
+
+        let fixed = 0;
+        const results = [];
+
+        for (const user of usersToFix.rows) {
+            try {
+                const verification = await verifyOnboarding(user.gravy_account_number);
+                if (verification.verified && verification.accountData && verification.accountData.fullName) {
+                    const nameParts = verification.accountData.fullName.split(' ');
+                    let newFirst = nameParts[0];
+                    let newLast = nameParts.length >= 2 ? nameParts.slice(1).join(' ') : user.last_name;
+
+                    // Only update if the name actually changed
+                    if (newFirst !== user.first_name || newLast !== user.last_name) {
+                        await pool.query(
+                            `UPDATE users SET first_name = $1, last_name = $2, updated_at = CURRENT_TIMESTAMP
+                             WHERE id = $3`,
+                            [newFirst, newLast, user.id]
+                        );
+                        fixed++;
+                        results.push({
+                            userId: user.id,
+                            oldName: `${user.first_name} ${user.last_name}`,
+                            newName: `${newFirst} ${newLast}`
+                        });
+                    }
+                }
+            } catch (e) {
+                console.error(`[Admin] Failed to fix name for user ${user.id}:`, e.message);
+            }
+        }
+
+        return res.json({
+            success: true,
+            message: `Fixed ${fixed} user name(s)`,
+            fixed,
+            results
+        });
+    } catch (err) {
+        console.error('[Admin] Fix user names error:', err);
+        return res.status(500).json({ error: 'Failed to fix user names' });
+    }
+});
+
+/**
  * POST /api/admin/fix-referral-chains
  * One-time fix: rebuild missing referral chains for users who have referred_by
  * set but no referral_tree entries, and distribute any missing earnings.
  */
-router.post('/fix-referral-chains', adminAuthMiddleware, async (req, res) => {
+router.post('/fix-referral-chains', adminAuthMiddleware(), async (req, res) => {
     try {
         const { registerReferralChain, distributeEarnings } = require('../services/referralTree');
 
