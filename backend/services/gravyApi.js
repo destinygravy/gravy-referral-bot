@@ -85,14 +85,22 @@ async function verifyOnboarding(accountNumber) {
 
             console.log(`[Paystack] Resolved account ${accountNumber}: "${accountName}"`);
 
-            // Check that account name starts with "Gravy/" — confirms it's a Gravy virtual account
-            if (accountName.toLowerCase().startsWith('gravy/')) {
+            // Check that account name starts with "Gravy" — confirms it's a Gravy virtual account
+            // Paystack returns "Gravy - First Last", Flutterwave returns "Gravy/First Last"
+            const accountNameLower = accountName.toLowerCase();
+            const isGravyAccount = accountNameLower.startsWith('gravy/') ||
+                                   accountNameLower.startsWith('gravy -') ||
+                                   accountNameLower.startsWith('gravy-');
+
+            if (isGravyAccount) {
+                // Extract the full name by removing the "Gravy" prefix and separator
+                const fullName = accountName.replace(/^gravy[\s\/\-]+/i, '').trim();
                 return {
                     verified: true,
                     accountData: {
                         accountNumber: resolvedNumber,
                         accountName: accountName,
-                        fullName: accountName.replace(/^gravy\//i, '').trim()
+                        fullName: fullName
                     },
                     apiResponse: data,
                     error: null
