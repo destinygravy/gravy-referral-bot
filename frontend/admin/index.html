@@ -1446,7 +1446,8 @@
             const data = await apiCall('/dashboard');
             if (!data) return;
 
-            const stats = data.data;
+            // API returns { success, dashboard: { ... } }
+            const stats = data.dashboard || data.data || {};
             const cardsHtml = `
                 <div class="card">
                     <div class="card-title">Total Users</div>
@@ -1458,7 +1459,7 @@
                 </div>
                 <div class="card">
                     <div class="card-title">Total Earnings</div>
-                    <div class="card-value">${formatCurrency(stats.totalEarnings || 0)}</div>
+                    <div class="card-value">${formatCurrency(stats.totalEarningsDistributed || stats.totalEarnings || 0)}</div>
                 </div>
                 <div class="card">
                     <div class="card-title">Today's New Users</div>
@@ -1470,40 +1471,46 @@
                 </div>
                 <div class="card">
                     <div class="card-title">Pending Withdrawals</div>
-                    <div class="card-value">${stats.pendingWithdrawalsCount || 0}</div>
-                    <div class="card-subtitle">${formatCurrency(stats.pendingWithdrawalsAmount || 0)}</div>
+                    <div class="card-value">${stats.withdrawals ? stats.withdrawals.pending : (stats.pendingWithdrawalsCount || 0)}</div>
+                    <div class="card-subtitle">${formatCurrency(stats.withdrawals ? stats.withdrawals.pendingAmount : (stats.pendingWithdrawalsAmount || 0))}</div>
                 </div>
             `;
             document.getElementById('dashboardCards').innerHTML = cardsHtml;
 
-            // Growth chart
-            if (stats.sevenDayGrowth && stats.sevenDayGrowth.length > 0) {
-                const maxValue = Math.max(...stats.sevenDayGrowth.map(d => d.count));
-                const barsHtml = stats.sevenDayGrowth.map((day, index) => {
-                    const height = (day.count / maxValue) * 100;
+            // Growth chart — API returns { growth: [{ date, count }] }
+            const growthData = stats.growth || stats.sevenDayGrowth || [];
+            if (growthData.length > 0) {
+                const maxValue = Math.max(...growthData.map(d => parseInt(d.count)));
+                const barsHtml = growthData.map((day, index) => {
+                    const height = maxValue > 0 ? (parseInt(day.count) / maxValue) * 100 : 5;
+                    const dateLabel = typeof day.date === 'string' ? day.date.split('T')[0].split('-')[2] : '';
                     return `
                         <div class="chart-bar" style="height: ${Math.max(height, 5)}%;">
                             <div class="chart-bar-value">${day.count}</div>
-                            <div class="chart-bar-label">${day.date.split('-')[2]}</div>
+                            <div class="chart-bar-label">${dateLabel}</div>
                         </div>
                     `;
                 }).join('');
                 document.getElementById('growthChart').innerHTML = barsHtml;
             }
 
-            // Top referrers
-            if (stats.topReferrers && stats.topReferrers.length > 0) {
+            // Top referrers — API returns { topReferrers: [{ name, username, totalEarned, directReferrals }] }
+            const topReferrers = stats.topReferrers || [];
+            if (topReferrers.length > 0) {
                 const tbody = document.querySelector('#referrersTable tbody');
-                tbody.innerHTML = stats.topReferrers.map((user, index) => `
+                tbody.innerHTML = topReferrers.map((user, index) => `
                     <tr>
                         <td>${index + 1}</td>
-                        <td>${user.displayName || user.fullName || 'N/A'}</td>
-                        <td>${user.username}</td>
+                        <td>${user.name || user.displayName || user.fullName || 'N/A'}</td>
+                        <td>${user.username || 'N/A'}</td>
                         <td>${user.directReferrals || 0}</td>
-                        <td>${user.totalReferrals || 0}</td>
-                        <td>${formatCurrency(user.totalEarnings || 0)}</td>
+                        <td>${user.totalReferrals || user.directReferrals || 0}</td>
+                        <td>${formatCurrency(user.totalEarned || user.totalEarnings || 0)}</td>
                     </tr>
                 `).join('');
+            } else {
+                const tbody = document.querySelector('#referrersTable tbody');
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#888;">No referral earnings yet</td></tr>';
             }
         }
 
@@ -1521,23 +1528,30 @@
             const data = await apiCall(`/users?${params}`);
             if (!data) return;
 
+            // API returns { success, users: [...], pagination: { page, limit, total, totalPages } }
+            const users = data.users || (data.data && data.data.users) || [];
             const tbody = document.querySelector('#usersTable tbody');
-            tbody.innerHTML = data.data.users.map(user => `
-                <tr class="expandable" onclick="showUserDetails('${user._id}')">
-                    <td>${user.displayName || user.fullName || 'N/A'}</td>
-                    <td>${user.username}</td>
+            tbody.innerHTML = users.map(user => `
+                <tr class="expandable" onclick="showUserDetails('${user.id || user._id}')">
+                    <td>${user.firstName || user.displayName || user.fullName || 'N/A'} ${user.lastName || ''}</td>
+                    <td>${user.username || 'N/A'}</td>
                     <td>${user.referralCode}</td>
-                    <td>${user.gravyAccount ? '✓' : '✗'}</td>
-                    <td><span class="badge ${user.onboarded ? 'badge-success' : 'badge-warning'}">${user.onboarded ? 'Yes' : 'No'}</span></td>
-                    <td>${formatCurrency(user.balance || 0)}</td>
+                    <td>${user.gravyAccount || user.gravyAccountNumber || ''}</td>
+                    <td><span class="badge ${(user.isOnboarded || user.onboarded) ? 'badge-success' : 'badge-warning'}">${(user.isOnboarded || user.onboarded) ? 'Yes' : 'No'}</span></td>
+                    <td>${formatCurrency(user.walletBalance || user.balance || 0)}</td>
                     <td>${formatCurrency(user.totalEarned || 0)}</td>
                     <td>${user.directReferrals || 0}</td>
                     <td>${formatDate(user.createdAt)}</td>
                 </tr>
             `).join('');
 
+            if (users.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#888;">No users found</td></tr>';
+            }
+
             // Pagination
-            const totalPages = Math.ceil(data.data.total / state.users.limit);
+            const pagination = data.pagination || data.data || {};
+            const totalPages = pagination.totalPages || Math.ceil((pagination.total || 0) / state.users.limit);
             renderPagination('usersPagination', state.users.page, totalPages, (page) => {
                 state.users.page = page;
                 loadUsers();
@@ -1548,78 +1562,106 @@
             const data = await apiCall(`/users/${userId}`);
             if (!data) return;
 
-            const user = data.data;
+            // API returns { success, user: {...}, referrals: [...], earnings: [...], transactions: [...] }
+            const user = data.user || data.data || {};
+            const referrals = data.referrals || [];
+            const earnings = data.earnings || [];
+            const transactions = data.transactions || [];
+
             const html = `
                 <div class="details-header">
                     <div>
-                        <div class="details-title">${user.displayName || user.fullName}</div>
-                        <div style="color: #888; font-size: 13px;">@${user.username}</div>
+                        <div class="details-title">${user.first_name || ''} ${user.last_name || ''}</div>
+                        <div style="color: #888; font-size: 13px;">@${user.telegram_username || 'N/A'} | Code: ${user.referral_code}</div>
                     </div>
                     <div style="display: flex; gap: 10px;">
-                        ${user.banned ? `<button class="btn btn-success" onclick="unbanUser('${userId}')">Unban</button>` : `<button class="btn btn-danger" onclick="banUser('${userId}')">Ban</button>`}
+                        ${!user.referred_by ? `<button class="btn btn-primary" onclick="showLinkReferralForm('${userId}', '${(user.first_name || '') + ' ' + (user.last_name || '')}')">🔗 Link Referrer</button>` : ''}
+                        ${user.is_banned ? `<button class="btn btn-success" onclick="unbanUser('${userId}')">Unban</button>` : `<button class="btn btn-danger" onclick="banUser('${userId}')">Ban</button>`}
                     </div>
                 </div>
 
                 <div class="details-body">
                     <div class="info-card">
                         <div class="info-label">User ID</div>
-                        <div class="info-value">${user._id}</div>
+                        <div class="info-value" style="font-size:11px;">${user.id}</div>
                     </div>
                     <div class="info-card">
                         <div class="info-label">Referral Code</div>
-                        <div class="info-value">${user.referralCode}</div>
+                        <div class="info-value">${user.referral_code}</div>
                     </div>
                     <div class="info-card">
                         <div class="info-label">Gravy Account</div>
-                        <div class="info-value">${user.gravyAccount ? '✓ Connected' : '✗ Not Connected'}</div>
+                        <div class="info-value">${user.gravy_account_number || '✗ Not Connected'}</div>
                     </div>
                     <div class="info-card">
                         <div class="info-label">Onboarded</div>
-                        <div class="info-value"><span class="badge ${user.onboarded ? 'badge-success' : 'badge-warning'}">${user.onboarded ? 'Yes' : 'No'}</span></div>
+                        <div class="info-value"><span class="badge ${user.is_onboarded ? 'badge-success' : 'badge-warning'}">${user.is_onboarded ? 'Yes' : 'No'}</span></div>
                     </div>
                     <div class="info-card">
                         <div class="info-label">Balance</div>
-                        <div class="info-value">${formatCurrency(user.balance || 0)}</div>
+                        <div class="info-value">${formatCurrency(user.wallet_balance || 0)}</div>
                     </div>
                     <div class="info-card">
                         <div class="info-label">Total Earned</div>
-                        <div class="info-value">${formatCurrency(user.totalEarned || 0)}</div>
+                        <div class="info-value">${formatCurrency(user.total_earned || 0)}</div>
                     </div>
                     <div class="info-card">
-                        <div class="info-label">Direct Referrals</div>
-                        <div class="info-value">${user.directReferrals || 0}</div>
-                    </div>
-                    <div class="info-card">
-                        <div class="info-label">Total Referrals</div>
-                        <div class="info-value">${user.totalReferrals || 0}</div>
+                        <div class="info-label">Referred By</div>
+                        <div class="info-value">${user.referred_by || 'None (no referrer)'}</div>
                     </div>
                     <div class="info-card">
                         <div class="info-label">Status</div>
-                        <div class="info-value"><span class="badge ${user.banned ? 'badge-danger' : 'badge-success'}">${user.banned ? 'Banned' : 'Active'}</span></div>
+                        <div class="info-value"><span class="badge ${user.is_banned ? 'badge-danger' : 'badge-success'}">${user.is_banned ? 'Banned' : 'Active'}</span></div>
                     </div>
                     <div class="info-card">
                         <div class="info-label">Joined</div>
-                        <div class="info-value">${formatDate(user.createdAt)}</div>
+                        <div class="info-value">${formatDate(user.created_at)}</div>
                     </div>
                 </div>
 
-                ${user.referralTree && user.referralTree.length > 0 ? `
+                ${referrals.length > 0 ? `
                     <div style="margin-top: 20px;">
-                        <h3 style="margin-bottom: 15px;">Direct Referrals</h3>
+                        <h3 style="margin-bottom: 15px;">Referral Network (${referrals.length} users)</h3>
                         <table style="width: 100%;">
                             <thead>
                                 <tr>
+                                    <th style="padding: 8px; border-bottom: 1px solid #2a3f5f; text-align: left;">Level</th>
                                     <th style="padding: 8px; border-bottom: 1px solid #2a3f5f; text-align: left;">Name</th>
                                     <th style="padding: 8px; border-bottom: 1px solid #2a3f5f; text-align: left;">Username</th>
                                     <th style="padding: 8px; border-bottom: 1px solid #2a3f5f; text-align: left;">Status</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                ${user.referralTree.map(ref => `
+                                ${referrals.map(ref => `
                                     <tr>
-                                        <td style="padding: 8px; border-bottom: 1px solid #2a3f5f;">${ref.displayName || ref.fullName}</td>
-                                        <td style="padding: 8px; border-bottom: 1px solid #2a3f5f;">@${ref.username}</td>
-                                        <td style="padding: 8px; border-bottom: 1px solid #2a3f5f;"><span class="badge ${ref.onboarded ? 'badge-success' : 'badge-warning'}">${ref.onboarded ? 'Onboarded' : 'Pending'}</span></td>
+                                        <td style="padding: 8px; border-bottom: 1px solid #2a3f5f;">L${ref.level}</td>
+                                        <td style="padding: 8px; border-bottom: 1px solid #2a3f5f;">${ref.first_name || 'N/A'}</td>
+                                        <td style="padding: 8px; border-bottom: 1px solid #2a3f5f;">@${ref.telegram_username || 'N/A'}</td>
+                                        <td style="padding: 8px; border-bottom: 1px solid #2a3f5f;"><span class="badge ${ref.is_onboarded ? 'badge-success' : 'badge-warning'}">${ref.is_onboarded ? 'Onboarded' : 'Pending'}</span></td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                ` : '<div style="margin-top:15px;color:#888;">No referral network yet</div>'}
+
+                ${earnings.length > 0 ? `
+                    <div style="margin-top: 20px;">
+                        <h3 style="margin-bottom: 15px;">Earnings (${earnings.length})</h3>
+                        <table style="width: 100%;">
+                            <thead>
+                                <tr>
+                                    <th style="padding: 8px; border-bottom: 1px solid #2a3f5f; text-align: left;">From</th>
+                                    <th style="padding: 8px; border-bottom: 1px solid #2a3f5f; text-align: left;">Amount</th>
+                                    <th style="padding: 8px; border-bottom: 1px solid #2a3f5f; text-align: left;">Date</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${earnings.map(e => `
+                                    <tr>
+                                        <td style="padding: 8px; border-bottom: 1px solid #2a3f5f;">${e.source_name || e.source_username || 'N/A'}</td>
+                                        <td style="padding: 8px; border-bottom: 1px solid #2a3f5f;">${formatCurrency(e.amount)}</td>
+                                        <td style="padding: 8px; border-bottom: 1px solid #2a3f5f;">${formatDate(e.created_at)}</td>
                                     </tr>
                                 `).join('')}
                             </tbody>
@@ -1627,9 +1669,9 @@
                     </div>
                 ` : ''}
 
-                ${user.transactions && user.transactions.length > 0 ? `
+                ${transactions.length > 0 ? `
                     <div style="margin-top: 20px;">
-                        <h3 style="margin-bottom: 15px;">Recent Transactions</h3>
+                        <h3 style="margin-bottom: 15px;">Transactions (${transactions.length})</h3>
                         <table style="width: 100%;">
                             <thead>
                                 <tr>
@@ -1639,11 +1681,11 @@
                                 </tr>
                             </thead>
                             <tbody>
-                                ${user.transactions.map(txn => `
+                                ${transactions.map(txn => `
                                     <tr>
                                         <td style="padding: 8px; border-bottom: 1px solid #2a3f5f;">${txn.type}</td>
                                         <td style="padding: 8px; border-bottom: 1px solid #2a3f5f;">${formatCurrency(txn.amount)}</td>
-                                        <td style="padding: 8px; border-bottom: 1px solid #2a3f5f;">${formatDate(txn.date)}</td>
+                                        <td style="padding: 8px; border-bottom: 1px solid #2a3f5f;">${formatDate(txn.created_at)}</td>
                                     </tr>
                                 `).join('')}
                             </tbody>
@@ -1654,6 +1696,38 @@
 
             document.getElementById('userDetailsBody').innerHTML = html;
             openModal('userDetailsModal');
+        }
+
+        // Link Referral functionality
+        async function showLinkReferralForm(userId, userName) {
+            const referrerCode = prompt(\`Link referrer for \${userName}\\n\\nEnter the REFERRAL CODE of the person who referred them (e.g. GRV926YX):\`);
+            if (!referrerCode || !referrerCode.trim()) return;
+
+            // Look up the referrer by code
+            const searchResult = await apiCall(\`/users?search=\${referrerCode.trim()}&limit=10\`);
+            if (!searchResult) return;
+
+            const users = searchResult.users || [];
+            const referrer = users.find(u => u.referralCode === referrerCode.trim());
+
+            if (!referrer) {
+                showToast(\`Referral code "\${referrerCode}" not found\`, 'error');
+                return;
+            }
+
+            const confirmMsg = \`Link \${userName} as referred by \${referrer.firstName} \${referrer.lastName || ''} (\${referrer.referralCode})?\\n\\nThis will:\\n- Set the referral relationship\\n- Build the referral chain\\n- Distribute any owed earnings\`;
+            if (!confirm(confirmMsg)) return;
+
+            const result = await apiCall('/link-referral', 'POST', {
+                userId: userId,
+                referrerId: referrer.id
+            });
+
+            if (result && result.success) {
+                showToast(result.message);
+                showUserDetails(userId); // Refresh the details
+                loadUsers(); // Refresh the users table
+            }
         }
 
         async function banUser(userId) {
@@ -1710,27 +1784,34 @@
             const data = await apiCall(`/withdrawals?${params}`);
             if (!data) return;
 
+            // API returns { success, withdrawals: [...], pagination: {...} }
+            const withdrawals = data.withdrawals || (data.data && data.data.withdrawals) || [];
             const tbody = document.querySelector('#withdrawalsTable tbody');
-            tbody.innerHTML = data.data.withdrawals.map(withdrawal => `
+            tbody.innerHTML = withdrawals.map(w => `
                 <tr>
-                    <td>${withdrawal.user.displayName || withdrawal.user.fullName}</td>
-                    <td>${formatCurrency(withdrawal.amount)}</td>
-                    <td>${withdrawal.destination}</td>
-                    <td><span class="badge badge-${getStatusBadgeClass(withdrawal.status)}">${withdrawal.status}</span></td>
+                    <td>${w.userName || (w.user && (w.user.displayName || w.user.fullName)) || 'N/A'}</td>
+                    <td>${formatCurrency(w.amount)}</td>
+                    <td>${w.destinationAccount || w.destination || 'N/A'}</td>
+                    <td><span class="badge badge-${getStatusBadgeClass(w.status)}">${w.status}</span></td>
                     <td>
-                        ${withdrawal.status === 'pending' ? `
-                            <button class="btn btn-success" onclick="approveWithdrawal('${withdrawal._id}')">Approve</button>
-                            <button class="btn btn-danger" onclick="rejectWithdrawal('${withdrawal._id}')">Reject</button>
+                        ${w.status === 'pending' ? `
+                            <button class="btn btn-success" onclick="approveWithdrawal('${w.id || w._id}')">Approve</button>
+                            <button class="btn btn-danger" onclick="rejectWithdrawal('${w.id || w._id}')">Reject</button>
                         ` : ''}
-                        ${withdrawal.status === 'approved' ? `
-                            <button class="btn btn-primary" onclick="processWithdrawal('${withdrawal._id}')">Process</button>
+                        ${w.status === 'approved' ? `
+                            <button class="btn btn-primary" onclick="processWithdrawal('${w.id || w._id}')">Process</button>
                         ` : ''}
                     </td>
-                    <td>${formatDate(withdrawal.createdAt)}</td>
+                    <td>${formatDate(w.createdAt)}</td>
                 </tr>
             `).join('');
 
-            const totalPages = Math.ceil(data.data.total / 25);
+            if (withdrawals.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#888;">No withdrawal requests</td></tr>';
+            }
+
+            const wPagination = data.pagination || data.data || {};
+            const totalPages = wPagination.totalPages || Math.ceil((wPagination.total || 0) / 25);
             renderPagination('withdrawalsPagination', state.withdrawals.page, totalPages, (page) => {
                 state.withdrawals.page = page;
                 loadWithdrawals();
@@ -1792,17 +1873,19 @@
             const data = await apiCall('/referrals/audit');
             if (!data) return;
 
+            // API returns { success, referrers: [...], recentEarnings: [...] }
+            const referrers = data.referrers || (data.data && data.data.topReferrers) || [];
             const tbody = document.querySelector('#referralAuditTable tbody');
-            tbody.innerHTML = data.data.topReferrers.map((user, index) => {
-                const paidCount = user.paidReferrals || 0;
-                const totalCount = user.totalReferrals || 0;
+            tbody.innerHTML = referrers.map((user, index) => {
+                const paidCount = parseInt(user.paid_referrals || user.paidReferrals || 0);
+                const totalCount = parseInt(user.referral_count || user.totalReferrals || 0);
                 const conversion = totalCount > 0 ? ((paidCount / totalCount) * 100).toFixed(1) : 0;
 
                 return `
                     <tr>
                         <td>${index + 1}</td>
-                        <td>${user.displayName || user.fullName}</td>
-                        <td>@${user.username}</td>
+                        <td>${user.first_name || user.displayName || user.fullName || 'N/A'}</td>
+                        <td>@${user.telegram_username || user.username || 'N/A'}</td>
                         <td>${totalCount}</td>
                         <td>${paidCount}</td>
                         <td>${totalCount - paidCount}</td>
@@ -1811,15 +1894,24 @@
                 `;
             }).join('');
 
+            if (referrers.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#888;">No referral data yet</td></tr>';
+            }
+
+            const recentEarnings = data.recentEarnings || (data.data && data.data.recentEarnings) || [];
             const earningsBody = document.querySelector('#recentEarningsTable tbody');
-            earningsBody.innerHTML = data.data.recentEarnings.map(earning => `
+            earningsBody.innerHTML = recentEarnings.map(earning => `
                 <tr>
-                    <td>${earning.fromUser.displayName || earning.fromUser.fullName}</td>
-                    <td>${earning.earnedFromUser.displayName || earning.earnedFromUser.fullName}</td>
+                    <td>${earning.earner_name || (earning.fromUser && earning.fromUser.displayName) || 'N/A'}</td>
+                    <td>${earning.source_name || (earning.earnedFromUser && earning.earnedFromUser.displayName) || 'N/A'}</td>
                     <td>${formatCurrency(earning.amount)}</td>
-                    <td>${formatDate(earning.date)}</td>
+                    <td>${formatDate(earning.created_at || earning.date)}</td>
                 </tr>
             `).join('');
+
+            if (recentEarnings.length === 0) {
+                earningsBody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#888;">No earnings yet</td></tr>';
+            }
         }
 
         // Admin Management
@@ -1827,20 +1919,22 @@
             const data = await apiCall('/admins');
             if (!data) return;
 
+            // API returns { success, admins: [...] }
+            const admins = data.admins || data.data || [];
             const tbody = document.querySelector('#adminsTable tbody');
-            tbody.innerHTML = data.data.map(admin => `
+            tbody.innerHTML = admins.map(admin => `
                 <tr>
                     <td>${admin.username}</td>
                     <td>${admin.email}</td>
-                    <td>${admin.displayName}</td>
+                    <td>${admin.display_name || admin.displayName}</td>
                     <td>${admin.role}</td>
-                    <td><span class="badge ${admin.active ? 'badge-success' : 'badge-danger'}">${admin.active ? 'Active' : 'Inactive'}</span></td>
-                    <td>${admin.lastLogin ? formatDate(admin.lastLogin) : 'Never'}</td>
+                    <td><span class="badge ${(admin.is_active !== false && admin.active !== false) ? 'badge-success' : 'badge-danger'}">${(admin.is_active !== false && admin.active !== false) ? 'Active' : 'Inactive'}</span></td>
+                    <td>${(admin.last_login_at || admin.lastLogin) ? formatDate(admin.last_login_at || admin.lastLogin) : 'Never'}</td>
                     <td>
-                        ${admin.active ? `
-                            <button class="btn btn-danger" onclick="deactivateAdmin('${admin._id}')">Deactivate</button>
+                        ${(admin.is_active !== false && admin.active !== false) ? `
+                            <button class="btn btn-danger" onclick="deactivateAdmin('${admin.id || admin._id}')">Deactivate</button>
                         ` : `
-                            <button class="btn btn-success" onclick="activateAdmin('${admin._id}')">Activate</button>
+                            <button class="btn btn-success" onclick="activateAdmin('${admin.id || admin._id}')">Activate</button>
                         `}
                     </td>
                 </tr>
@@ -1893,12 +1987,23 @@
             const data = await apiCall('/settings');
             if (!data) return;
 
-            const fieldsHtml = Object.entries(data.data).map(([key, value]) => `
-                <div class="form-group">
-                    <label for="setting_${key}">${key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' ')}</label>
-                    <input type="text" id="setting_${key}" name="${key}" value="${value}" required>
-                </div>
-            `).join('');
+            // API returns { success, settings: { key: { value, description } } }
+            const settings = data.settings || data.data || {};
+            const fieldsHtml = Object.entries(settings).map(([key, val]) => {
+                const value = (typeof val === 'object' && val.value !== undefined) ? val.value : val;
+                const desc = (typeof val === 'object' && val.description) ? val.description : '';
+                return `
+                    <div class="form-group">
+                        <label for="setting_${key}">${key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' ')}${desc ? ' <small style="color:#888">(' + desc + ')</small>' : ''}</label>
+                        <input type="text" id="setting_${key}" name="${key}" value="${value}" required>
+                    </div>
+                `;
+            }).join('');
+
+            if (Object.keys(settings).length === 0) {
+                document.getElementById('settingsFields').innerHTML = '<p style="color:#888;">No settings configured yet.</p>';
+                return;
+            }
 
             document.getElementById('settingsFields').innerHTML = fieldsHtml;
         }
@@ -1927,19 +2032,25 @@
             const data = await apiCall(`/audit-log?${params}`);
             if (!data) return;
 
+            // API returns { success, logs: [...], pagination: {...} }
+            const logs = data.logs || (data.data && data.data.logs) || [];
             const tbody = document.querySelector('#auditLogTable tbody');
-            tbody.innerHTML = data.data.logs.map(log => `
+            tbody.innerHTML = logs.map(log => `
                 <tr>
-                    <td>${log.admin.displayName || log.admin.username}</td>
+                    <td>${log.display_name || log.username || (log.admin && (log.admin.displayName || log.admin.username)) || 'System'}</td>
                     <td>${log.action}</td>
-                    <td>${log.resource}</td>
-                    <td>${log.details || 'N/A'}</td>
-                    <td>${log.ip}</td>
-                    <td>${formatDate(log.timestamp)}</td>
+                    <td>${log.resource_type || log.resource || 'N/A'}</td>
+                    <td>${log.details ? (typeof log.details === 'object' ? JSON.stringify(log.details).substring(0,80) : log.details) : 'N/A'}</td>
+                    <td>${formatDate(log.created_at || log.timestamp)}</td>
                 </tr>
             `).join('');
 
-            const totalPages = Math.ceil(data.data.total / state.auditLog.limit);
+            if (logs.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#888;">No audit log entries</td></tr>';
+            }
+
+            const alPagination = data.pagination || data.data || {};
+            const totalPages = alPagination.totalPages || Math.ceil((alPagination.total || 0) / state.auditLog.limit);
             renderPagination('auditLogPagination', state.auditLog.page, totalPages, (page) => {
                 state.auditLog.page = page;
                 loadAuditLog();
@@ -1951,16 +2062,22 @@
             const data = await apiCall('/security-events?limit=50');
             if (!data) return;
 
+            // API returns { success, events: [...] }
+            const events = data.events || data.data || [];
             const tbody = document.querySelector('#securityEventsTable tbody');
-            tbody.innerHTML = data.data.map(event => `
+            tbody.innerHTML = events.map(event => `
                 <tr>
-                    <td><span class="badge badge-${event.type === 'login' ? 'success' : 'warning'}">${event.type}</span></td>
-                    <td>${event.ip}</td>
+                    <td><span class="badge badge-${(event.event_type || event.type || '').includes('login') ? 'success' : 'warning'}">${event.event_type || event.type}</span></td>
+                    <td>${event.ip_address || event.ip || 'N/A'}</td>
                     <td>${event.username || 'N/A'}</td>
-                    <td>${event.details || 'N/A'}</td>
-                    <td>${formatDate(event.timestamp)}</td>
+                    <td>${event.details ? (typeof event.details === 'object' ? JSON.stringify(event.details).substring(0,80) : event.details) : 'N/A'}</td>
+                    <td>${formatDate(event.created_at || event.timestamp)}</td>
                 </tr>
             `).join('');
+
+            if (events.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#888;">No security events</td></tr>';
+            }
         }
 
         // Pagination helper

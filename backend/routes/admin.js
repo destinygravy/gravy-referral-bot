@@ -907,6 +907,94 @@ router.put('/settings', adminAuthMiddleware('super_admin'), async (req, res) => 
 });
 
 /**
+ * POST /api/admin/link-referral
+ * Manually link a user to a referrer (for cases where the referral code
+ * wasn't captured during registration).
+ *
+ * Body: { userId: string, referrerId: string }
+ */
+router.post('/link-referral', adminAuthMiddleware('admin'), async (req, res) => {
+    const { userId, referrerId } = req.body;
+
+    if (!userId || !referrerId) {
+        return res.status(400).json({ error: 'Both userId and referrerId are required' });
+    }
+
+    if (userId === referrerId) {
+        return res.status(400).json({ error: 'A user cannot refer themselves' });
+    }
+
+    try {
+        const { registerReferralChain, distributeEarnings } = require('../services/referralTree');
+
+        // Verify both users exist
+        const [userResult, referrerResult] = await Promise.all([
+            pool.query('SELECT id, first_name, last_name, referred_by, is_onboarded FROM users WHERE id = $1', [userId]),
+            pool.query('SELECT id, first_name, last_name, referral_code FROM users WHERE id = $1', [referrerId])
+        ]);
+
+        if (userResult.rows.length === 0) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        if (referrerResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Referrer not found' });
+        }
+
+        const user = userResult.rows[0];
+        const referrer = referrerResult.rows[0];
+
+        // Check if user already has a referrer
+        if (user.referred_by) {
+            return res.status(400).json({
+                error: `User already has a referrer (${user.referred_by}). Unlink first if needed.`
+            });
+        }
+
+        // Check for circular referral (referrer can't be in user's downstream)
+        const circularCheck = await pool.query(
+            'SELECT id FROM referral_tree WHERE ancestor_id = $1 AND descendant_id = $2',
+            [userId, referrerId]
+        );
+        if (circularCheck.rows.length > 0) {
+            return res.status(400).json({ error: 'Circular referral detected — the referrer is already downstream of this user' });
+        }
+
+        // Set referred_by
+        await pool.query(
+            'UPDATE users SET referred_by = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+            [referrerId, userId]
+        );
+
+        // Build referral chain
+        await registerReferralChain(userId, referrerId);
+
+        // If user is onboarded, distribute earnings
+        let earningsDistributed = 0;
+        if (user.is_onboarded) {
+            const earnings = await distributeEarnings(userId);
+            earningsDistributed = earnings.length;
+        }
+
+        await logAuditEvent(req.admin.id, 'referral.manual_link', 'user', userId,
+            {
+                referrerId,
+                userName: `${user.first_name} ${user.last_name}`,
+                referrerName: `${referrer.first_name} ${referrer.last_name}`,
+                earningsDistributed
+            }, req);
+
+        return res.json({
+            success: true,
+            message: `Linked ${user.first_name} ${user.last_name} → referred by ${referrer.first_name} ${referrer.last_name}. ${earningsDistributed} earnings distributed.`,
+            earningsDistributed
+        });
+    } catch (err) {
+        console.error('[Admin] Link referral error:', err);
+        return res.status(500).json({ error: 'Failed to link referral: ' + err.message });
+    }
+});
+
+/**
  * POST /api/admin/fix-user-names
  * Re-resolve names from Paystack for already-verified users whose names
  * weren't populated (e.g., verified before the name-population code was deployed).
