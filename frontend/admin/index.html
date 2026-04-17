@@ -1700,22 +1700,22 @@
 
         // Link Referral functionality
         async function showLinkReferralForm(userId, userName) {
-            const referrerCode = prompt(\`Link referrer for \${userName}\\n\\nEnter the REFERRAL CODE of the person who referred them (e.g. GRV926YX):\`);
+            const referrerCode = prompt(`Link referrer for ${userName}\n\nEnter the REFERRAL CODE of the person who referred them (e.g. GRV926YX):`);
             if (!referrerCode || !referrerCode.trim()) return;
 
             // Look up the referrer by code
-            const searchResult = await apiCall(\`/users?search=\${referrerCode.trim()}&limit=10\`);
+            const searchResult = await apiCall(`/users?search=${referrerCode.trim()}&limit=10`);
             if (!searchResult) return;
 
             const users = searchResult.users || [];
             const referrer = users.find(u => u.referralCode === referrerCode.trim());
 
             if (!referrer) {
-                showToast(\`Referral code "\${referrerCode}" not found\`, 'error');
+                showToast(`Referral code "${referrerCode}" not found`, 'error');
                 return;
             }
 
-            const confirmMsg = \`Link \${userName} as referred by \${referrer.firstName} \${referrer.lastName || ''} (\${referrer.referralCode})?\\n\\nThis will:\\n- Set the referral relationship\\n- Build the referral chain\\n- Distribute any owed earnings\`;
+            const confirmMsg = `Link ${userName} as referred by ${referrer.firstName} ${referrer.lastName || ''} (${referrer.referralCode})?\n\nThis will:\n- Set the referral relationship\n- Build the referral chain\n- Distribute any owed earnings`;
             if (!confirm(confirmMsg)) return;
 
             const result = await apiCall('/link-referral', 'POST', {
