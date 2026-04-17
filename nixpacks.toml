@@ -1,0 +1,8 @@
+[phases.setup]
+nixPkgs = ["nodejs-20_x", "npm"]
+
+[phases.install]
+cmds = ["npm install --production"]
+
+[start]
+cmd = "node backend/server.js & node bot/bot.js & wait"

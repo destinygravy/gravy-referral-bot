@@ -1,0 +1,1542 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Gravy Referral Programme</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        /* ============================================================
+           CSS VARIABLES & RESET
+           ============================================================ */
+        :root {
+            --primary: #6C3CE1;
+            --primary-dark: #5A2DC5;
+            --primary-light: #8B5CF6;
+            --secondary: #10B981;
+            --accent: #F59E0B;
+            --danger: #EF4444;
+            --bg: #0F0F1A;
+            --bg-card: #1A1A2E;
+            --bg-card-hover: #222240;
+            --text: #FFFFFF;
+            --text-secondary: #9CA3AF;
+            --text-muted: #6B7280;
+            --border: #2D2D44;
+            --success-bg: rgba(16, 185, 129, 0.1);
+            --warning-bg: rgba(245, 158, 11, 0.1);
+            --radius: 16px;
+            --radius-sm: 10px;
+            --shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            overflow-x: hidden;
+            padding-bottom: 90px;
+        }
+
+        /* ============================================================
+           LOADING SCREEN
+           ============================================================ */
+        .loading-screen {
+            position: fixed;
+            inset: 0;
+            background: var(--bg);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            transition: opacity 0.3s;
+        }
+
+        .loading-screen.hidden { opacity: 0; pointer-events: none; }
+
+        .loading-logo {
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(135deg, var(--primary), var(--primary-light));
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 36px;
+            font-weight: 800;
+            margin-bottom: 16px;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        .loading-text {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+
+        .spinner {
+            width: 24px;
+            height: 24px;
+            border: 3px solid var(--border);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-top: 16px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* ============================================================
+           HEADER
+           ============================================================ */
+        .header {
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            padding: 20px 20px 30px;
+            border-radius: 0 0 24px 24px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .header::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -30%;
+            width: 200px;
+            height: 200px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 50%;
+        }
+
+        .header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .header-greeting {
+            font-size: 14px;
+            opacity: 0.8;
+        }
+
+        .header-name {
+            font-size: 22px;
+            font-weight: 700;
+        }
+
+        .header-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .status-verified {
+            background: var(--success-bg);
+            color: var(--secondary);
+        }
+
+        .status-pending {
+            background: var(--warning-bg);
+            color: var(--accent);
+        }
+
+        .wallet-card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: var(--radius);
+            padding: 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .wallet-label {
+            font-size: 12px;
+            opacity: 0.7;
+            margin-bottom: 4px;
+        }
+
+        .wallet-balance {
+            font-size: 28px;
+            font-weight: 800;
+        }
+
+        .wallet-balance span {
+            font-size: 16px;
+            opacity: 0.7;
+        }
+
+        .wallet-earned {
+            text-align: right;
+        }
+
+        .wallet-earned-amount {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--secondary);
+        }
+
+        /* ============================================================
+           ONBOARDING CARD (shown when not verified)
+           ============================================================ */
+        .onboarding-card {
+            margin: 16px;
+            background: linear-gradient(135deg, #1E1E36, #2A1E4E);
+            border: 1px solid var(--primary);
+            border-radius: var(--radius);
+            padding: 20px;
+        }
+
+        .onboarding-card h3 {
+            font-size: 18px;
+            margin-bottom: 8px;
+        }
+
+        .onboarding-card p {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 16px;
+            line-height: 1.5;
+        }
+
+        .onboarding-steps {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .onboarding-step {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .step-number {
+            width: 28px;
+            height: 28px;
+            background: var(--primary);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            font-weight: 700;
+            flex-shrink: 0;
+        }
+
+        .step-text {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .input-group {
+            margin-bottom: 12px;
+        }
+
+        .input-group label {
+            display: block;
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+        }
+
+        .input-group input {
+            width: 100%;
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            color: var(--text);
+            font-size: 15px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .input-group input:focus {
+            border-color: var(--primary);
+        }
+
+        .input-group input::placeholder {
+            color: var(--text-muted);
+        }
+
+        /* ============================================================
+           BUTTONS
+           ============================================================ */
+        .btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            width: 100%;
+            padding: 14px 20px;
+            border: none;
+            border-radius: var(--radius-sm);
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn:active { transform: scale(0.98); }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-primary:hover { background: var(--primary-dark); }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+
+        .btn-success {
+            background: var(--secondary);
+            color: white;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* ============================================================
+           STATS GRID
+           ============================================================ */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin: 16px;
+        }
+
+        .stat-card {
+            background: var(--bg-card);
+            border-radius: var(--radius-sm);
+            padding: 14px 10px;
+            text-align: center;
+        }
+
+        .stat-icon {
+            font-size: 20px;
+            margin-bottom: 6px;
+        }
+
+        .stat-value {
+            font-size: 20px;
+            font-weight: 700;
+        }
+
+        .stat-label {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-top: 2px;
+        }
+
+        /* ============================================================
+           SECTION
+           ============================================================ */
+        .section {
+            padding: 0 16px;
+            margin-bottom: 20px;
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .section-title {
+            font-size: 17px;
+            font-weight: 700;
+        }
+
+        .section-action {
+            font-size: 13px;
+            color: var(--primary-light);
+            cursor: pointer;
+        }
+
+        /* ============================================================
+           REFERRAL LINK CARD
+           ============================================================ */
+        .referral-link-card {
+            background: var(--bg-card);
+            border-radius: var(--radius);
+            padding: 20px;
+            margin: 16px;
+        }
+
+        .referral-link-box {
+            display: flex;
+            align-items: center;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px dashed var(--primary);
+            border-radius: var(--radius-sm);
+            padding: 12px;
+            margin: 12px 0;
+            gap: 10px;
+        }
+
+        .referral-link-text {
+            font-size: 13px;
+            color: var(--text-secondary);
+            word-break: break-all;
+            flex: 1;
+        }
+
+        .copy-btn {
+            padding: 8px 16px;
+            background: var(--primary);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .share-buttons {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 12px;
+        }
+
+        /* ============================================================
+           EARNINGS BREAKDOWN
+           ============================================================ */
+        .earnings-breakdown {
+            background: var(--bg-card);
+            border-radius: var(--radius);
+            overflow: hidden;
+        }
+
+        .earnings-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 16px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .earnings-row:last-child { border-bottom: none; }
+
+        .earnings-level {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .level-badge {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            font-weight: 700;
+        }
+
+        .level-1 { background: rgba(108, 60, 225, 0.2); color: var(--primary-light); }
+        .level-2 { background: rgba(16, 185, 129, 0.2); color: var(--secondary); }
+        .level-3 { background: rgba(245, 158, 11, 0.2); color: var(--accent); }
+
+        .earnings-info { font-size: 13px; }
+        .earnings-info-sub { font-size: 11px; color: var(--text-secondary); }
+
+        .earnings-amount {
+            font-weight: 700;
+            color: var(--secondary);
+        }
+
+        /* ============================================================
+           ACTIVITY / TRANSACTION LIST
+           ============================================================ */
+        .activity-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .activity-item {
+            background: var(--bg-card);
+            border-radius: var(--radius-sm);
+            padding: 14px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .activity-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .activity-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+        }
+
+        .activity-name { font-size: 14px; font-weight: 600; }
+        .activity-desc { font-size: 11px; color: var(--text-secondary); }
+        .activity-amount { font-weight: 700; color: var(--secondary); }
+        .activity-date { font-size: 11px; color: var(--text-muted); }
+
+        /* ============================================================
+           REFERRAL TREE
+           ============================================================ */
+        .tree-container {
+            background: var(--bg-card);
+            border-radius: var(--radius);
+            padding: 16px;
+        }
+
+        .tree-level {
+            margin-bottom: 16px;
+        }
+
+        .tree-level-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 10px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .tree-node {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 12px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 8px;
+            margin-bottom: 6px;
+            margin-left: 20px;
+            border-left: 2px solid var(--border);
+        }
+
+        .tree-node-name {
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .tree-node-status {
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 10px;
+        }
+
+        .tree-node-status.verified {
+            background: var(--success-bg);
+            color: var(--secondary);
+        }
+
+        .tree-node-status.pending {
+            background: var(--warning-bg);
+            color: var(--accent);
+        }
+
+        /* ============================================================
+           LEADERBOARD
+           ============================================================ */
+        .leaderboard-tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        .leaderboard-tab {
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            border: none;
+            cursor: pointer;
+            background: var(--bg-card);
+            color: var(--text-secondary);
+            transition: all 0.2s;
+        }
+
+        .leaderboard-tab.active {
+            background: var(--primary);
+            color: white;
+        }
+
+        .leaderboard-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .leaderboard-item {
+            background: var(--bg-card);
+            border-radius: var(--radius-sm);
+            padding: 14px 16px;
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .leaderboard-rank {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            font-weight: 700;
+            background: var(--bg);
+            flex-shrink: 0;
+        }
+
+        .rank-1 { background: linear-gradient(135deg, #FFD700, #FFA500); color: #000; }
+        .rank-2 { background: linear-gradient(135deg, #C0C0C0, #A0A0A0); color: #000; }
+        .rank-3 { background: linear-gradient(135deg, #CD7F32, #A0522D); color: #fff; }
+
+        .leaderboard-info { flex: 1; }
+        .leaderboard-name { font-size: 14px; font-weight: 600; }
+        .leaderboard-network { font-size: 11px; color: var(--text-secondary); }
+        .leaderboard-earned { font-weight: 700; color: var(--secondary); font-size: 14px; }
+
+        .my-rank-card {
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            border-radius: var(--radius);
+            padding: 16px;
+            margin-bottom: 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .my-rank-label { font-size: 12px; opacity: 0.7; }
+        .my-rank-value { font-size: 24px; font-weight: 800; }
+
+        /* ============================================================
+           BOTTOM NAVIGATION
+           ============================================================ */
+        .bottom-nav {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: var(--bg-card);
+            border-top: 1px solid var(--border);
+            display: flex;
+            justify-content: space-around;
+            padding: 8px 0;
+            padding-bottom: max(8px, env(safe-area-inset-bottom));
+            z-index: 100;
+        }
+
+        .nav-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            padding: 6px 12px;
+            border: none;
+            background: none;
+            cursor: pointer;
+            color: var(--text-muted);
+            transition: color 0.2s;
+        }
+
+        .nav-item.active { color: var(--primary-light); }
+
+        .nav-icon { font-size: 22px; }
+        .nav-label { font-size: 10px; font-weight: 600; }
+
+        /* ============================================================
+           PAGE CONTAINERS
+           ============================================================ */
+        .page { display: none; }
+        .page.active { display: block; }
+
+        /* ============================================================
+           EMPTY STATE
+           ============================================================ */
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+        }
+
+        .empty-icon { font-size: 48px; margin-bottom: 12px; }
+        .empty-title { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+        .empty-desc { font-size: 13px; color: var(--text-secondary); }
+
+        /* ============================================================
+           TOAST NOTIFICATION
+           ============================================================ */
+        .toast {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%) translateY(-100px);
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 12px 20px;
+            font-size: 14px;
+            z-index: 10000;
+            transition: transform 0.3s ease;
+            box-shadow: var(--shadow);
+            max-width: 90%;
+            text-align: center;
+        }
+
+        .toast.show { transform: translateX(-50%) translateY(0); }
+        .toast.success { border-color: var(--secondary); }
+        .toast.error { border-color: var(--danger); }
+
+        /* ============================================================
+           RESPONSIVE
+           ============================================================ */
+        @media (min-width: 400px) {
+            .stats-grid { grid-template-columns: repeat(3, 1fr); }
+        }
+    </style>
+</head>
+<body>
+
+<!-- ============================================================
+     LOADING SCREEN
+     ============================================================ -->
+<div id="loadingScreen" class="loading-screen">
+    <div class="loading-logo">G</div>
+    <div class="loading-text">Loading Gravy Referral...</div>
+    <div class="spinner"></div>
+</div>
+
+<!-- ============================================================
+     TOAST
+     ============================================================ -->
+<div id="toast" class="toast"></div>
+
+<!-- ============================================================
+     PAGE: HOME
+     ============================================================ -->
+<div id="page-home" class="page active">
+    <div class="header">
+        <div class="header-top">
+            <div>
+                <div class="header-greeting">Welcome back,</div>
+                <div class="header-name" id="userName">---</div>
+            </div>
+            <span id="verifyStatus" class="header-status status-pending">⏳ Unverified</span>
+        </div>
+        <div class="wallet-card">
+            <div>
+                <div class="wallet-label">Wallet Balance</div>
+                <div class="wallet-balance"><span>₦</span><span id="walletBalance">0.00</span></div>
+            </div>
+            <div class="wallet-earned">
+                <div class="wallet-label">Total Earned</div>
+                <div class="wallet-earned-amount">₦<span id="totalEarned">0.00</span></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Onboarding Card (shown if not verified) -->
+    <div id="onboardingCard" class="onboarding-card" style="display:none;">
+        <h3>🎯 Complete Your Setup</h3>
+        <p>Verify your Gravy account to start earning from referrals.</p>
+        <div class="onboarding-steps">
+            <div class="onboarding-step">
+                <div class="step-number">1</div>
+                <div class="step-text">Download & sign up on Gravy Mobile</div>
+            </div>
+            <div class="onboarding-step">
+                <div class="step-number">2</div>
+                <div class="step-text">Complete the onboarding process</div>
+            </div>
+            <div class="onboarding-step">
+                <div class="step-number">3</div>
+                <div class="step-text">Enter your virtual account number below</div>
+            </div>
+        </div>
+        <div class="input-group">
+            <label>Your Gravy Virtual Account Number</label>
+            <input type="text" id="gravyAccountInput" placeholder="Enter your virtual account number">
+        </div>
+        <button class="btn btn-primary" id="verifyBtn" onclick="verifyOnboarding()">
+            ✅ Verify My Account
+        </button>
+    </div>
+
+    <!-- Quick Stats -->
+    <div class="stats-grid" id="statsGrid">
+        <div class="stat-card">
+            <div class="stat-icon">👥</div>
+            <div class="stat-value" id="statDirect">0</div>
+            <div class="stat-label">Direct Refs</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon">🌐</div>
+            <div class="stat-value" id="statNetwork">0</div>
+            <div class="stat-label">Network</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon">🔥</div>
+            <div class="stat-value" id="statRank">#--</div>
+            <div class="stat-label">Your Rank</div>
+        </div>
+    </div>
+
+    <!-- Earnings Breakdown -->
+    <div class="section">
+        <div class="section-header">
+            <span class="section-title">Earnings Breakdown</span>
+        </div>
+        <div class="earnings-breakdown">
+            <div class="earnings-row">
+                <div class="earnings-level">
+                    <div class="level-badge level-1">L1</div>
+                    <div>
+                        <div class="earnings-info">Direct Referrals</div>
+                        <div class="earnings-info-sub">₦200 per referral</div>
+                    </div>
+                </div>
+                <div class="earnings-amount" id="earnL1">₦0</div>
+            </div>
+            <div class="earnings-row">
+                <div class="earnings-level">
+                    <div class="level-badge level-2">L2</div>
+                    <div>
+                        <div class="earnings-info">Level 2 Referrals</div>
+                        <div class="earnings-info-sub">₦50 per referral</div>
+                    </div>
+                </div>
+                <div class="earnings-amount" id="earnL2">₦0</div>
+            </div>
+            <div class="earnings-row">
+                <div class="earnings-level">
+                    <div class="level-badge level-3">L3</div>
+                    <div>
+                        <div class="earnings-info">Level 3 Referrals</div>
+                        <div class="earnings-info-sub">₦10 per referral</div>
+                    </div>
+                </div>
+                <div class="earnings-amount" id="earnL3">₦0</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent Activity -->
+    <div class="section">
+        <div class="section-header">
+            <span class="section-title">Recent Activity</span>
+            <span class="section-action" onclick="switchTab('wallet')">See all</span>
+        </div>
+        <div class="activity-list" id="recentActivity">
+            <div class="empty-state">
+                <div class="empty-icon">📭</div>
+                <div class="empty-title">No activity yet</div>
+                <div class="empty-desc">Start referring friends to earn!</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================
+     PAGE: REFER
+     ============================================================ -->
+<div id="page-refer" class="page">
+    <div style="padding: 20px 16px;">
+        <h2 style="font-size: 22px; margin-bottom: 4px;">🔗 Refer & Earn</h2>
+        <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 20px;">
+            Share your link and earn up to ₦260 per chain!
+        </p>
+    </div>
+
+    <div class="referral-link-card" id="referralLinkSection">
+        <div style="font-weight: 600; margin-bottom: 4px;">Your Referral Link</div>
+        <div style="font-size: 12px; color: var(--text-secondary);">Share this with friends to start earning</div>
+        <div class="referral-link-box">
+            <span class="referral-link-text" id="referralLinkText">Loading...</span>
+            <button class="copy-btn" onclick="copyReferralLink()">Copy</button>
+        </div>
+        <div class="share-buttons">
+            <button class="btn btn-primary" onclick="shareToTelegram()" style="font-size: 14px;">
+                📤 Share on Telegram
+            </button>
+            <button class="btn btn-secondary" onclick="shareGeneral()" style="font-size: 14px;">
+                🔗 Share Link
+            </button>
+        </div>
+    </div>
+
+    <!-- Not verified message -->
+    <div id="referNotVerified" style="display:none; margin: 16px;">
+        <div class="onboarding-card">
+            <h3>🔒 Verify First</h3>
+            <p>You need to complete your Gravy onboarding before you can start referring others.</p>
+            <button class="btn btn-primary" onclick="switchTab('home')">Go to Verification</button>
+        </div>
+    </div>
+
+    <!-- How it works -->
+    <div class="section" style="margin-top: 20px;">
+        <div class="section-title" style="margin-bottom: 16px;">💡 How It Works</div>
+        <div class="earnings-breakdown">
+            <div class="earnings-row">
+                <div class="earnings-level">
+                    <div class="level-badge level-1" style="font-size: 18px;">🤝</div>
+                    <div>
+                        <div class="earnings-info">You refer someone</div>
+                        <div class="earnings-info-sub">They complete Gravy onboarding</div>
+                    </div>
+                </div>
+                <div class="earnings-amount">+₦200</div>
+            </div>
+            <div class="earnings-row">
+                <div class="earnings-level">
+                    <div class="level-badge level-2" style="font-size: 18px;">👥</div>
+                    <div>
+                        <div class="earnings-info">Your referral refers someone</div>
+                        <div class="earnings-info-sub">Passive earning from their activity</div>
+                    </div>
+                </div>
+                <div class="earnings-amount">+₦50</div>
+            </div>
+            <div class="earnings-row">
+                <div class="earnings-level">
+                    <div class="level-badge level-3" style="font-size: 18px;">🌐</div>
+                    <div>
+                        <div class="earnings-info">3rd level refers someone</div>
+                        <div class="earnings-info-sub">Deep passive income</div>
+                    </div>
+                </div>
+                <div class="earnings-amount">+₦10</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================
+     PAGE: TREE (Referral Network)
+     ============================================================ -->
+<div id="page-tree" class="page">
+    <div style="padding: 20px 16px;">
+        <h2 style="font-size: 22px; margin-bottom: 4px;">🌳 Your Network</h2>
+        <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 20px;">
+            See everyone in your referral tree
+        </p>
+    </div>
+
+    <div class="section">
+        <div class="tree-container" id="treeContainer">
+            <div class="empty-state">
+                <div class="empty-icon">🌱</div>
+                <div class="empty-title">No referrals yet</div>
+                <div class="empty-desc">Share your link to grow your network!</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================
+     PAGE: LEADERBOARD
+     ============================================================ -->
+<div id="page-leaderboard" class="page">
+    <div style="padding: 20px 16px;">
+        <h2 style="font-size: 22px; margin-bottom: 4px;">🏆 Leaderboard</h2>
+        <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 16px;">
+            Top referrers in the Gravy network
+        </p>
+
+        <div class="my-rank-card" id="myRankCard" style="display:none;">
+            <div>
+                <div class="my-rank-label">Your Position</div>
+                <div class="my-rank-value" id="myRankDisplay">#--</div>
+            </div>
+            <div style="text-align: right;">
+                <div class="my-rank-label">Your Earnings</div>
+                <div class="my-rank-value" style="font-size: 18px;">₦<span id="myRankEarnings">0</span></div>
+            </div>
+        </div>
+
+        <div class="leaderboard-tabs">
+            <button class="leaderboard-tab active" onclick="loadLeaderboard('all', this)">All Time</button>
+            <button class="leaderboard-tab" onclick="loadLeaderboard('month', this)">This Month</button>
+            <button class="leaderboard-tab" onclick="loadLeaderboard('week', this)">This Week</button>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="leaderboard-list" id="leaderboardList">
+            <div class="empty-state">
+                <div class="empty-icon">🏆</div>
+                <div class="empty-title">Loading leaderboard...</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================
+     PAGE: WALLET
+     ============================================================ -->
+<div id="page-wallet" class="page">
+    <div style="padding: 20px 16px;">
+        <h2 style="font-size: 22px; margin-bottom: 4px;">💰 Wallet</h2>
+        <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 20px;">
+            Your earnings and transaction history
+        </p>
+
+        <div class="wallet-card" style="background: var(--bg-card); margin-bottom: 20px;">
+            <div>
+                <div class="wallet-label">Available Balance</div>
+                <div class="wallet-balance"><span>₦</span><span id="walletBalancePage">0.00</span></div>
+            </div>
+            <div class="wallet-earned">
+                <div class="wallet-label">Total Earned</div>
+                <div class="wallet-earned-amount">₦<span id="totalEarnedPage">0.00</span></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <span class="section-title">Transaction History</span>
+        </div>
+        <div class="activity-list" id="transactionList">
+            <div class="empty-state">
+                <div class="empty-icon">📋</div>
+                <div class="empty-title">No transactions yet</div>
+                <div class="empty-desc">Your referral earnings will appear here</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================
+     BOTTOM NAVIGATION
+     ============================================================ -->
+<nav class="bottom-nav">
+    <button class="nav-item active" onclick="switchTab('home')" data-tab="home">
+        <span class="nav-icon">🏠</span>
+        <span class="nav-label">Home</span>
+    </button>
+    <button class="nav-item" onclick="switchTab('refer')" data-tab="refer">
+        <span class="nav-icon">🔗</span>
+        <span class="nav-label">Refer</span>
+    </button>
+    <button class="nav-item" onclick="switchTab('tree')" data-tab="tree">
+        <span class="nav-icon">🌳</span>
+        <span class="nav-label">Network</span>
+    </button>
+    <button class="nav-item" onclick="switchTab('leaderboard')" data-tab="leaderboard">
+        <span class="nav-icon">🏆</span>
+        <span class="nav-label">Ranks</span>
+    </button>
+    <button class="nav-item" onclick="switchTab('wallet')" data-tab="wallet">
+        <span class="nav-icon">💰</span>
+        <span class="nav-label">Wallet</span>
+    </button>
+</nav>
+
+<!-- ============================================================
+     JAVASCRIPT
+     ============================================================ -->
+<script>
+    // ============================================================
+    // CONFIGURATION
+    // ============================================================
+    const API_BASE = window.location.origin + '/api';
+    const tg = window.Telegram?.WebApp;
+
+    // State
+    let currentUser = null;
+    let referralLink = '';
+    let shareText = '';
+
+    // ============================================================
+    // INITIALIZATION
+    // ============================================================
+    document.addEventListener('DOMContentLoaded', async () => {
+        // Initialize Telegram WebApp
+        if (tg) {
+            tg.ready();
+            tg.expand();
+            tg.setHeaderColor('#6C3CE1');
+            tg.setBackgroundColor('#0F0F1A');
+        }
+
+        // Get referral code from URL params
+        const urlParams = new URLSearchParams(window.location.search);
+        const refCode = urlParams.get('ref');
+
+        // Check for tab param
+        const tabParam = urlParams.get('tab');
+
+        try {
+            // Register / login the user
+            const response = await apiCall('/auth/register', 'POST', {
+                referralCode: refCode || null
+            });
+
+            if (response.success) {
+                currentUser = response.user;
+                updateUI();
+                loadAllData();
+            }
+
+            // Switch to requested tab
+            if (tabParam) {
+                switchTab(tabParam);
+            }
+        } catch (error) {
+            console.error('Init error:', error);
+            showToast('Failed to connect. Please try again.', 'error');
+        }
+
+        // Hide loading screen
+        setTimeout(() => {
+            document.getElementById('loadingScreen').classList.add('hidden');
+        }, 800);
+    });
+
+    // ============================================================
+    // API HELPER
+    // ============================================================
+    async function apiCall(endpoint, method = 'GET', body = null) {
+        const options = {
+            method,
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Telegram-Init-Data': tg?.initData || ''
+            }
+        };
+
+        if (body) {
+            options.body = JSON.stringify(body);
+        }
+
+        const response = await fetch(API_BASE + endpoint, options);
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error || 'Request failed');
+        }
+
+        return data;
+    }
+
+    // ============================================================
+    // UI UPDATES
+    // ============================================================
+    function updateUI() {
+        if (!currentUser) return;
+
+        // Name
+        const name = currentUser.firstName || currentUser.username || 'User';
+        document.getElementById('userName').textContent = name;
+
+        // Balance
+        document.getElementById('walletBalance').textContent = formatMoney(currentUser.walletBalance);
+        document.getElementById('totalEarned').textContent = formatMoney(currentUser.totalEarned);
+        document.getElementById('walletBalancePage').textContent = formatMoney(currentUser.walletBalance);
+        document.getElementById('totalEarnedPage').textContent = formatMoney(currentUser.totalEarned);
+
+        // Verification status
+        const statusEl = document.getElementById('verifyStatus');
+        const onboardingCard = document.getElementById('onboardingCard');
+
+        if (currentUser.isOnboarded) {
+            statusEl.className = 'header-status status-verified';
+            statusEl.textContent = '✅ Verified';
+            onboardingCard.style.display = 'none';
+            document.getElementById('referralLinkSection').style.display = 'block';
+            document.getElementById('referNotVerified').style.display = 'none';
+        } else {
+            statusEl.className = 'header-status status-pending';
+            statusEl.textContent = '⏳ Unverified';
+            onboardingCard.style.display = 'block';
+            document.getElementById('referralLinkSection').style.display = 'none';
+            document.getElementById('referNotVerified').style.display = 'block';
+        }
+    }
+
+    // ============================================================
+    // LOAD ALL DATA
+    // ============================================================
+    async function loadAllData() {
+        await Promise.allSettled([
+            loadReferralStats(),
+            loadReferralLink(),
+            loadRecentActivity(),
+            loadLeaderboard('all'),
+            loadReferralTree(),
+            loadTransactions()
+        ]);
+    }
+
+    // ============================================================
+    // REFERRAL STATS
+    // ============================================================
+    async function loadReferralStats() {
+        try {
+            const data = await apiCall('/referral/stats');
+            if (data.success) {
+                const s = data.stats;
+                document.getElementById('statDirect').textContent = s.level1.count;
+                document.getElementById('statNetwork').textContent = s.totalNetwork;
+                document.getElementById('earnL1').textContent = '₦' + formatMoney(s.level1.earnings);
+                document.getElementById('earnL2').textContent = '₦' + formatMoney(s.level2.earnings);
+                document.getElementById('earnL3').textContent = '₦' + formatMoney(s.level3.earnings);
+            }
+        } catch (e) { console.error('Stats error:', e); }
+    }
+
+    // ============================================================
+    // REFERRAL LINK
+    // ============================================================
+    async function loadReferralLink() {
+        try {
+            const data = await apiCall('/referral/link');
+            if (data.success) {
+                referralLink = data.referralLink;
+                shareText = data.shareText;
+                document.getElementById('referralLinkText').textContent = referralLink;
+            }
+        } catch (e) {
+            // User not verified yet, expected
+        }
+    }
+
+    // ============================================================
+    // RECENT ACTIVITY
+    // ============================================================
+    async function loadRecentActivity() {
+        try {
+            const data = await apiCall('/referral/recent-activity?limit=5');
+            if (data.success && data.activity.length > 0) {
+                const container = document.getElementById('recentActivity');
+                container.innerHTML = data.activity.map(item => `
+                    <div class="activity-item">
+                        <div class="activity-left">
+                            <div class="activity-icon level-${item.level}" style="background: rgba(108,60,225,0.15);">
+                                ${item.level === 1 ? '🤝' : item.level === 2 ? '👥' : '🌐'}
+                            </div>
+                            <div>
+                                <div class="activity-name">${escapeHtml(item.from)}</div>
+                                <div class="activity-desc">Level ${item.level} referral</div>
+                            </div>
+                        </div>
+                        <div style="text-align: right;">
+                            <div class="activity-amount">+₦${formatMoney(item.amount)}</div>
+                            <div class="activity-date">${timeAgo(item.date)}</div>
+                        </div>
+                    </div>
+                `).join('');
+            }
+        } catch (e) { console.error('Activity error:', e); }
+    }
+
+    // ============================================================
+    // REFERRAL TREE
+    // ============================================================
+    async function loadReferralTree() {
+        try {
+            const data = await apiCall('/referral/tree');
+            if (data.success) {
+                const tree = data.tree;
+                const hasReferrals = tree.level1.length + tree.level2.length + tree.level3.length > 0;
+
+                if (!hasReferrals) return;
+
+                const container = document.getElementById('treeContainer');
+                let html = '';
+
+                if (tree.level1.length > 0) {
+                    html += renderTreeLevel('Level 1 — Direct Referrals', '🤝', tree.level1, 'level-1');
+                }
+                if (tree.level2.length > 0) {
+                    html += renderTreeLevel('Level 2 — Indirect Referrals', '👥', tree.level2, 'level-2');
+                }
+                if (tree.level3.length > 0) {
+                    html += renderTreeLevel('Level 3 — Deep Referrals', '🌐', tree.level3, 'level-3');
+                }
+
+                container.innerHTML = html;
+            }
+        } catch (e) { console.error('Tree error:', e); }
+    }
+
+    function renderTreeLevel(title, icon, nodes, className) {
+        return `
+            <div class="tree-level">
+                <div class="tree-level-header">
+                    <span>${icon}</span>
+                    <span>${title} (${nodes.length})</span>
+                </div>
+                ${nodes.map(n => `
+                    <div class="tree-node">
+                        <span class="tree-node-name">${escapeHtml(n.firstName || n.username || 'Anonymous')}</span>
+                        <span class="tree-node-status ${n.isOnboarded ? 'verified' : 'pending'}">
+                            ${n.isOnboarded ? '✅ Verified' : '⏳ Pending'}
+                        </span>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    // ============================================================
+    // LEADERBOARD
+    // ============================================================
+    async function loadLeaderboard(period, btn = null) {
+        // Update active tab
+        if (btn) {
+            document.querySelectorAll('.leaderboard-tab').forEach(t => t.classList.remove('active'));
+            btn.classList.add('active');
+        }
+
+        try {
+            const data = await apiCall(`/leaderboard?period=${period}&limit=20`);
+            if (data.success) {
+                // Show user's rank
+                if (data.myRank) {
+                    document.getElementById('myRankCard').style.display = 'flex';
+                    document.getElementById('myRankDisplay').textContent = '#' + data.myRank;
+                    document.getElementById('statRank').textContent = '#' + data.myRank;
+                    if (currentUser) {
+                        document.getElementById('myRankEarnings').textContent = formatMoney(currentUser.totalEarned);
+                    }
+                }
+
+                const container = document.getElementById('leaderboardList');
+
+                if (data.leaderboard.length === 0) {
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-icon">🏆</div>
+                            <div class="empty-title">No rankings yet</div>
+                            <div class="empty-desc">Be the first to earn and top the board!</div>
+                        </div>
+                    `;
+                    return;
+                }
+
+                container.innerHTML = data.leaderboard.map(item => `
+                    <div class="leaderboard-item">
+                        <div class="leaderboard-rank ${item.rank <= 3 ? 'rank-' + item.rank : ''}">
+                            ${item.rank <= 3 ? ['🥇', '🥈', '🥉'][item.rank - 1] : item.rank}
+                        </div>
+                        <div class="leaderboard-info">
+                            <div class="leaderboard-name">${escapeHtml(item.firstName || item.username || 'Anonymous')}</div>
+                            <div class="leaderboard-network">${item.directReferrals} direct · ${item.totalNetwork} total</div>
+                        </div>
+                        <div class="leaderboard-earned">₦${formatMoney(item.earned)}</div>
+                    </div>
+                `).join('');
+            }
+        } catch (e) { console.error('Leaderboard error:', e); }
+    }
+
+    // ============================================================
+    // TRANSACTIONS
+    // ============================================================
+    async function loadTransactions() {
+        try {
+            const data = await apiCall('/wallet/transactions?limit=30');
+            if (data.success && data.transactions.length > 0) {
+                const container = document.getElementById('transactionList');
+                container.innerHTML = data.transactions.map(tx => `
+                    <div class="activity-item">
+                        <div class="activity-left">
+                            <div class="activity-icon" style="background: ${tx.amount > 0 ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)'};">
+                                ${tx.amount > 0 ? '💰' : '💸'}
+                            </div>
+                            <div>
+                                <div class="activity-name">${escapeHtml(tx.description || tx.type)}</div>
+                                <div class="activity-desc">${timeAgo(tx.date)}</div>
+                            </div>
+                        </div>
+                        <div style="text-align: right;">
+                            <div style="font-weight: 700; color: ${tx.amount > 0 ? 'var(--secondary)' : 'var(--danger)'};">
+                                ${tx.amount > 0 ? '+' : ''}₦${formatMoney(Math.abs(tx.amount))}
+                            </div>
+                            <div class="activity-date">Bal: ₦${formatMoney(tx.balanceAfter)}</div>
+                        </div>
+                    </div>
+                `).join('');
+            }
+        } catch (e) { console.error('Transactions error:', e); }
+    }
+
+    // ============================================================
+    // VERIFY ONBOARDING
+    // ============================================================
+    async function verifyOnboarding() {
+        const accountNumber = document.getElementById('gravyAccountInput').value.trim();
+        const btn = document.getElementById('verifyBtn');
+
+        if (!accountNumber) {
+            showToast('Please enter your Gravy account number', 'error');
+            return;
+        }
+
+        btn.disabled = true;
+        btn.textContent = '⏳ Verifying...';
+
+        try {
+            const data = await apiCall('/auth/verify-onboarding', 'POST', {
+                gravyAccountNumber: accountNumber
+            });
+
+            if (data.success) {
+                currentUser = data.user;
+                updateUI();
+                showToast('Account verified! You can now earn from referrals!', 'success');
+                loadAllData();
+
+                // Haptic feedback on Telegram
+                if (tg?.HapticFeedback) {
+                    tg.HapticFeedback.notificationOccurred('success');
+                }
+            }
+        } catch (error) {
+            showToast(error.message, 'error');
+            if (tg?.HapticFeedback) {
+                tg.HapticFeedback.notificationOccurred('error');
+            }
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '✅ Verify My Account';
+        }
+    }
+
+    // ============================================================
+    // SHARE FUNCTIONS
+    // ============================================================
+    function copyReferralLink() {
+        if (!referralLink) return;
+        navigator.clipboard.writeText(referralLink).then(() => {
+            showToast('Link copied!', 'success');
+            if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
+        }).catch(() => {
+            // Fallback for older browsers
+            const input = document.createElement('input');
+            input.value = referralLink;
+            document.body.appendChild(input);
+            input.select();
+            document.execCommand('copy');
+            document.body.removeChild(input);
+            showToast('Link copied!', 'success');
+        });
+    }
+
+    function shareToTelegram() {
+        if (!referralLink) return;
+        const text = encodeURIComponent(shareText);
+        window.open(`https://t.me/share/url?url=${encodeURIComponent(referralLink)}&text=${text}`);
+    }
+
+    function shareGeneral() {
+        if (!referralLink) return;
+        if (navigator.share) {
+            navigator.share({
+                title: 'Join Gravy Referral Programme',
+                text: shareText,
+                url: referralLink
+            });
+        } else {
+            copyReferralLink();
+        }
+    }
+
+    // ============================================================
+    // NAVIGATION
+    // ============================================================
+    function switchTab(tabName) {
+        // Hide all pages
+        document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+
+        // Show selected page
+        const page = document.getElementById('page-' + tabName);
+        if (page) page.classList.add('active');
+
+        const navItem = document.querySelector(`.nav-item[data-tab="${tabName}"]`);
+        if (navItem) navItem.classList.add('active');
+
+        // Haptic feedback
+        if (tg?.HapticFeedback) tg.HapticFeedback.selectionChanged();
+    }
+
+    // ============================================================
+    // UTILITIES
+    // ============================================================
+    function formatMoney(amount) {
+        return Number(amount || 0).toLocaleString('en-NG', {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 0
+        });
+    }
+
+    function timeAgo(dateStr) {
+        const now = new Date();
+        const date = new Date(dateStr);
+        const seconds = Math.floor((now - date) / 1000);
+
+        if (seconds < 60) return 'just now';
+        if (seconds < 3600) return Math.floor(seconds / 60) + 'm ago';
+        if (seconds < 86400) return Math.floor(seconds / 3600) + 'h ago';
+        if (seconds < 604800) return Math.floor(seconds / 86400) + 'd ago';
+        return date.toLocaleDateString('en-NG', { month: 'short', day: 'numeric' });
+    }
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return str.replace(/[&<>"']/g, m => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        })[m]);
+    }
+
+    function showToast(message, type = '') {
+        const toast = document.getElementById('toast');
+        toast.textContent = message;
+        toast.className = 'toast ' + type;
+        setTimeout(() => toast.classList.add('show'), 10);
+        setTimeout(() => toast.classList.remove('show'), 3000);
+    }
+</script>
+</body>
+</html>
