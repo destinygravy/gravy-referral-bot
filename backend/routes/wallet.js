@@ -343,7 +343,7 @@ router.get('/withdrawal-info', telegramAuthMiddleware, async (req, res) => {
                 completedWithdrawals: completedWithdrawals,
                 canWithdraw: canWithdraw,
                 availableBalance: availableBalance,
-                isOnboarded: user.isOnboarded,
+                isOnboarded: user.is_onboarded,
                 hasPendingWithdrawal: hasPendingWithdrawal,
                 pendingWithdrawal: hasPendingWithdrawal ? {
                     amount: parseFloat(pendingWithdrawalResult.rows[0].amount),

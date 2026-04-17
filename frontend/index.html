@@ -1192,7 +1192,7 @@
 
             <!-- Insufficient balance warning -->
             <div id="insufficientBalanceNotice" class="withdrawal-status" style="display:none;">
-                ❌ Insufficient balance for current tier withdrawal.
+                💰 You need <strong id="shortfallAmount">₦0</strong> more to unlock your next withdrawal.
             </div>
 
             <!-- Not onboarded warning -->
@@ -1673,7 +1673,18 @@
 
         // Show/hide notices
         pendingNotice.style.display = withdrawalInfo.hasPendingWithdrawal ? 'block' : 'none';
-        insufficientNotice.style.display = (!withdrawalInfo.canWithdraw && !withdrawalInfo.hasPendingWithdrawal) ? 'block' : 'none';
+        const showInsufficient = !withdrawalInfo.canWithdraw && !withdrawalInfo.hasPendingWithdrawal;
+        insufficientNotice.style.display = showInsufficient ? 'block' : 'none';
+        if (showInsufficient) {
+            const minAmount = Math.min(...withdrawalInfo.allowedAmounts);
+            const shortfall = minAmount - withdrawalInfo.availableBalance;
+            const shortfallEl = document.getElementById('shortfallAmount');
+            if (shortfallEl && shortfall > 0) {
+                shortfallEl.textContent = `₦${formatMoney(Math.ceil(shortfall))}`;
+            } else if (shortfallEl) {
+                shortfallEl.textContent = '₦0';
+            }
+        }
         notOnboardedNotice.style.display = 'none'; // Already checked above
 
         // Render tier/unlimited buttons
