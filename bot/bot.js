@@ -24,9 +24,12 @@ bot.start(async (ctx) => {
         referralCode = payload.replace('ref_', '');
     }
 
+    // Pass referral code as URL query param — Telegram WebApp buttons preserve these
     const webAppUrl = referralCode
         ? `${WEBAPP_URL}?ref=${referralCode}`
         : WEBAPP_URL;
+
+    console.log(`[Bot] /start from ${ctx.from.id} (${firstName}), payload: ${payload || 'none'}, webAppUrl: ${webAppUrl}`);
 
     const firstName = ctx.from.first_name || 'there';
 

@@ -22,6 +22,8 @@ router.post('/register', telegramAuthMiddleware, async (req, res) => {
     const { id: telegramId, username, first_name, last_name } = req.telegramUser;
     const { referralCode } = req.body;
 
+    console.log(`[Auth] Registration attempt: telegramId=${telegramId}, username=${username}, referralCode=${referralCode || 'NONE'}`);
+
     try {
         // Check if user already exists
         let userResult = await pool.query(
@@ -43,14 +45,20 @@ router.post('/register', telegramAuthMiddleware, async (req, res) => {
         let referrerId = null;
 
         if (referralCode) {
+            console.log(`[Auth] Looking up referral code: ${referralCode}`);
             const referrerResult = await pool.query(
-                'SELECT id FROM users WHERE referral_code = $1',
+                'SELECT id, first_name, referral_code FROM users WHERE referral_code = $1',
                 [referralCode]
             );
 
             if (referrerResult.rows.length > 0) {
                 referrerId = referrerResult.rows[0].id;
+                console.log(`[Auth] Found referrer: ${referrerResult.rows[0].first_name} (${referrerId})`);
+            } else {
+                console.log(`[Auth] WARNING: Referral code "${referralCode}" not found in database`);
             }
+        } else {
+            console.log(`[Auth] No referral code provided`);
         }
 
         // Generate unique referral code for this user

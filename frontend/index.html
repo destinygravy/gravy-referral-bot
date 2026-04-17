@@ -1109,9 +1109,26 @@
             tg.setBackgroundColor('#0F0F1A');
         }
 
-        // Get referral code from URL params
+        // Get referral code — check multiple sources since Telegram WebView
+        // may pass it as URL param OR as startParam depending on how the app was opened
         const urlParams = new URLSearchParams(window.location.search);
-        const refCode = urlParams.get('ref');
+        let refCode = urlParams.get('ref');
+
+        // Fallback: Telegram's startParam (from deep link ?start=ref_CODE)
+        if (!refCode && tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) {
+            const startParam = tg.initDataUnsafe.start_param;
+            if (startParam.startsWith('ref_')) {
+                refCode = startParam.replace('ref_', '');
+            } else {
+                refCode = startParam;
+            }
+        }
+
+        console.log('[Gravy] Referral code sources:', {
+            urlParam: urlParams.get('ref'),
+            startParam: tg?.initDataUnsafe?.start_param,
+            resolved: refCode
+        });
 
         // Check for tab param
         const tabParam = urlParams.get('tab');
