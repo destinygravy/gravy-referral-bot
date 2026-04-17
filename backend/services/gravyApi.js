@@ -1,28 +1,61 @@
 /**
  * Gravy Account Verification Service
  *
- * Uses Flutterwave's Resolve Account API to verify that a user
+ * Uses Paystack's Resolve Account API to verify that a user
  * has a legitimate Gravy virtual account (powered by Paga).
  *
  * Verification logic:
- * 1. Call Flutterwave POST /v3/accounts/resolve with the account number + Paga bank code
+ * 1. Call Paystack GET /bank/resolve with account_number + bank_code (Paga)
  * 2. Check that the resolved account_name starts with "Gravy/" (Gravy virtual accounts)
  * 3. Return the verified account data
  */
 
 const axios = require('axios');
 
-const flutterwaveClient = axios.create({
-    baseURL: 'https://api.flutterwave.com',
+const paystackClient = axios.create({
+    baseURL: 'https://api.paystack.co',
     timeout: 15000,
     headers: {
-        'Authorization': `Bearer ${process.env.FLUTTERWAVE_SECRET_KEY}`,
+        'Authorization': `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
         'Content-Type': 'application/json'
     }
 });
 
-// Paga bank code on Flutterwave
+// Paga bank code on Paystack
+// Use PAGA_BANK_CODE env var, or we'll auto-detect it via the banks list
 const PAGA_BANK_CODE = process.env.PAGA_BANK_CODE || '100002';
+
+/**
+ * Look up Paga's bank code from Paystack's bank list
+ * Called once on startup as a fallback if the env var code doesn't work
+ */
+let resolvedPagaBankCode = null;
+async function getPagaBankCode() {
+    if (resolvedPagaBankCode) return resolvedPagaBankCode;
+
+    try {
+        const response = await paystackClient.get('/bank', {
+            params: { country: 'nigeria', perPage: 200 }
+        });
+
+        if (response.data && response.data.data) {
+            const pagaBank = response.data.data.find(bank =>
+                bank.name.toLowerCase().includes('paga')
+            );
+
+            if (pagaBank) {
+                resolvedPagaBankCode = pagaBank.code;
+                console.log(`[Paystack] Found Paga bank code: ${pagaBank.code} (${pagaBank.name})`);
+                return pagaBank.code;
+            }
+        }
+    } catch (e) {
+        console.error('[Paystack] Failed to fetch bank list:', e.message);
+    }
+
+    // Fallback to env var or default
+    return PAGA_BANK_CODE;
+}
 
 /**
  * Verify if a user has a valid Gravy virtual account
@@ -32,17 +65,25 @@ const PAGA_BANK_CODE = process.env.PAGA_BANK_CODE || '100002';
  */
 async function verifyOnboarding(accountNumber) {
     try {
-        const response = await flutterwaveClient.post('/v3/accounts/resolve', {
-            account_number: accountNumber,
-            account_bank: PAGA_BANK_CODE
+        // Get Paga bank code (auto-detect or from env)
+        const bankCode = await getPagaBankCode();
+
+        // Paystack resolve account: GET /bank/resolve?account_number=XXX&bank_code=XXX
+        const response = await paystackClient.get('/bank/resolve', {
+            params: {
+                account_number: accountNumber,
+                bank_code: bankCode
+            }
         });
 
         const { data } = response;
 
-        // Flutterwave returns { status: "success", data: { account_number, account_name } }
-        if (data && data.status === 'success' && data.data) {
+        // Paystack returns { status: true, data: { account_number, account_name } }
+        if (data && data.status === true && data.data) {
             const accountName = data.data.account_name || '';
             const resolvedNumber = data.data.account_number || accountNumber;
+
+            console.log(`[Paystack] Resolved account ${accountNumber}: "${accountName}"`);
 
             // Check that account name starts with "Gravy/" — confirms it's a Gravy virtual account
             if (accountName.toLowerCase().startsWith('gravy/')) {
@@ -63,7 +104,7 @@ async function verifyOnboarding(accountNumber) {
                 verified: false,
                 accountData: null,
                 apiResponse: data,
-                error: 'This account is not a Gravy virtual account. Please enter your Gravy account number.'
+                error: `This account is not a Gravy virtual account. Account name: "${accountName}". Please enter your Gravy account number.`
             };
         }
 
@@ -76,23 +117,23 @@ async function verifyOnboarding(accountNumber) {
         };
 
     } catch (error) {
-        // Handle Flutterwave API errors
+        // Handle Paystack API errors
         if (error.response) {
             const status = error.response.status;
             const errorData = error.response.data;
 
             if (status === 400) {
-                console.error('[Flutterwave] Bad request:', errorData);
+                console.error('[Paystack] Bad request:', JSON.stringify(errorData));
                 return {
                     verified: false,
                     accountData: null,
                     apiResponse: errorData,
-                    error: 'Invalid account number. Please check and try again.'
+                    error: errorData?.message || 'Invalid account number. Please check and try again.'
                 };
             }
 
             if (status === 401 || status === 403) {
-                console.error('[Flutterwave] Authentication error:', errorData);
+                console.error('[Paystack] Authentication error:', JSON.stringify(errorData));
                 return {
                     verified: false,
                     accountData: null,
@@ -101,16 +142,17 @@ async function verifyOnboarding(accountNumber) {
                 };
             }
 
-            if (status === 404) {
+            if (status === 404 || status === 422) {
+                console.error('[Paystack] Not found/unprocessable:', JSON.stringify(errorData));
                 return {
                     verified: false,
                     accountData: null,
                     apiResponse: errorData,
-                    error: 'Account not found. Please check your account number.'
+                    error: errorData?.message || 'Account not found. Please check your account number.'
                 };
             }
 
-            console.error(`[Flutterwave] API error (${status}):`, errorData);
+            console.error(`[Paystack] API error (${status}):`, JSON.stringify(errorData));
             return {
                 verified: false,
                 accountData: null,
@@ -120,7 +162,7 @@ async function verifyOnboarding(accountNumber) {
         }
 
         // Network / timeout error
-        console.error('[Flutterwave] Network error:', error.message);
+        console.error('[Paystack] Network error:', error.message);
         return {
             verified: false,
             accountData: null,
