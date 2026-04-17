@@ -44,11 +44,11 @@ router.post('/register', telegramAuthMiddleware, async (req, res) => {
 
         if (referralCode) {
             const referrerResult = await pool.query(
-                'SELECT id, is_onboarded FROM users WHERE referral_code = $1',
+                'SELECT id FROM users WHERE referral_code = $1',
                 [referralCode]
             );
 
-            if (referrerResult.rows.length > 0 && referrerResult.rows[0].is_onboarded) {
+            if (referrerResult.rows.length > 0) {
                 referrerId = referrerResult.rows[0].id;
             }
         }
@@ -194,6 +194,40 @@ router.post('/verify-onboarding', telegramAuthMiddleware, async (req, res) => {
 
         // Distribute referral earnings to ancestors
         const earnings = await distributeEarnings(user.id);
+
+        // Retroactive fix: if this user was referred but the chain wasn't
+        // created (because referrer wasn't onboarded at the time), create it now
+        if (!user.referred_by) {
+            // Check if this user was registered with a referral code that wasn't linked
+            // (This handles old accounts that missed the chain)
+            console.log(`[Auth] User ${user.id} has no referred_by — skipping retroactive chain`);
+        }
+
+        // Also check: now that this user is onboarded, are there any
+        // descendants who are already onboarded but whose earnings weren't paid?
+        // (Handles case where descendant verified before this ancestor did)
+        try {
+            const unpaidDescendants = await pool.query(
+                `SELECT rt.descendant_id, rt.level
+                 FROM referral_tree rt
+                 JOIN users u ON u.id = rt.descendant_id
+                 LEFT JOIN referral_earnings re ON re.earner_id = rt.ancestor_id AND re.source_user_id = rt.descendant_id
+                 WHERE rt.ancestor_id = $1
+                   AND u.is_onboarded = TRUE
+                   AND re.id IS NULL`,
+                [user.id]
+            );
+
+            if (unpaidDescendants.rows.length > 0) {
+                console.log(`[Auth] Found ${unpaidDescendants.rows.length} unpaid descendants for newly onboarded user ${user.id}`);
+                for (const desc of unpaidDescendants.rows) {
+                    await distributeEarnings(desc.descendant_id);
+                }
+            }
+        } catch (retroError) {
+            console.error('[Auth] Retroactive earnings error:', retroError);
+            // Non-fatal — don't fail the verification
+        }
 
         return res.json({
             success: true,

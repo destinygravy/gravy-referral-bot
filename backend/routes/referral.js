@@ -122,7 +122,7 @@ router.get('/link', telegramAuthMiddleware, async (req, res) => {
             referralLink,
             googlePlayUrl,
             appleStoreUrl,
-            shareText: `🚀 Join Gravy Mobile and start earning!\n\n📲 Download Gravy:\n🤖 Android: ${googlePlayUrl}\n🍎 iPhone: ${appleStoreUrl}\n\n🎁 Then open my referral link to claim your bonus:\n${referralLink}`
+            shareText: `🚀 Join Gravy Mobile and start earning!\n\n📲 Step 1: Download Gravy App\nGoogle Play Store (Android): ${googlePlayUrl}\nApple App Store (iPhone): ${appleStoreUrl}\n\n🎁 Step 2: Open my referral link to claim your bonus:\n${referralLink}`
         });
 
     } catch (error) {

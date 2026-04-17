@@ -906,4 +906,54 @@ router.put('/settings', adminAuthMiddleware('super_admin'), async (req, res) => 
     }
 });
 
+/**
+ * POST /api/admin/fix-referral-chains
+ * One-time fix: rebuild missing referral chains for users who have referred_by
+ * set but no referral_tree entries, and distribute any missing earnings.
+ */
+router.post('/fix-referral-chains', adminAuthMiddleware, async (req, res) => {
+    try {
+        const { registerReferralChain, distributeEarnings } = require('../services/referralTree');
+
+        // Find users who have referred_by but no referral_tree entry
+        const missingChains = await pool.query(
+            `SELECT u.id, u.referred_by, u.is_onboarded, u.first_name
+             FROM users u
+             LEFT JOIN referral_tree rt ON rt.descendant_id = u.id AND rt.level = 1
+             WHERE u.referred_by IS NOT NULL AND rt.id IS NULL`
+        );
+
+        let chainsFixed = 0;
+        let earningsDistributed = 0;
+
+        for (const user of missingChains.rows) {
+            try {
+                await registerReferralChain(user.id, user.referred_by);
+                chainsFixed++;
+
+                // If this user is already onboarded, distribute earnings
+                if (user.is_onboarded) {
+                    const earnings = await distributeEarnings(user.id);
+                    earningsDistributed += earnings.length;
+                }
+            } catch (e) {
+                console.error(`[Admin] Failed to fix chain for user ${user.id}:`, e.message);
+            }
+        }
+
+        await logAuditEvent(req.admin.id, 'referral.fix_chains', 'system', null,
+            { chainsFixed, earningsDistributed, totalChecked: missingChains.rows.length }, req);
+
+        return res.json({
+            success: true,
+            message: `Fixed ${chainsFixed} referral chains, distributed ${earningsDistributed} earnings`,
+            chainsFixed,
+            earningsDistributed
+        });
+    } catch (err) {
+        console.error('[Admin] Fix referral chains error:', err);
+        return res.status(500).json({ error: 'Failed to fix referral chains' });
+    }
+});
+
 module.exports = router;
