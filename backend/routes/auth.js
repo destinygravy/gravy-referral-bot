@@ -32,8 +32,55 @@ router.post('/register', telegramAuthMiddleware, async (req, res) => {
         );
 
         if (userResult.rows.length > 0) {
-            // Existing user — return their profile
+            // Existing user — check if we can retroactively link a referrer
             const user = userResult.rows[0];
+
+            if (referralCode && !user.referred_by) {
+                // User has no referrer but opened the app via a referral link — link them now
+                try {
+                    const referrerResult = await pool.query(
+                        'SELECT id, first_name, referral_code FROM users WHERE referral_code = $1',
+                        [referralCode]
+                    );
+
+                    if (referrerResult.rows.length > 0) {
+                        const referrerId = referrerResult.rows[0].id;
+
+                        // Make sure they're not trying to refer themselves
+                        if (referrerId !== user.id) {
+                            console.log(`[Auth] Retroactive referral link: ${user.first_name} (${user.id}) → referred by ${referrerResult.rows[0].first_name} (${referrerId})`);
+
+                            await pool.query(
+                                'UPDATE users SET referred_by = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+                                [referrerId, user.id]
+                            );
+
+                            // Register the referral chain
+                            await registerReferralChain(user.id, referrerId);
+
+                            // If user is already onboarded, distribute earnings immediately
+                            if (user.is_onboarded) {
+                                const earnings = await distributeEarnings(user.id);
+                                console.log(`[Auth] Retroactive earnings distributed: ${earnings.length} payments`);
+                            }
+
+                            // Refresh user data after update
+                            const updatedResult = await pool.query(
+                                'SELECT * FROM users WHERE id = $1', [user.id]
+                            );
+                            return res.json({
+                                success: true,
+                                isNew: false,
+                                user: formatUserResponse(updatedResult.rows[0])
+                            });
+                        }
+                    }
+                } catch (retroError) {
+                    console.error('[Auth] Retroactive referral link error:', retroError);
+                    // Non-fatal — still return the user profile
+                }
+            }
+
             return res.json({
                 success: true,
                 isNew: false,
