@@ -12,8 +12,36 @@ const { Telegraf, Markup } = require('telegraf');
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const WEBAPP_URL = process.env.WEBAPP_URL;
+const API_BASE = process.env.WEBAPP_URL; // API is on the same domain
+const BOT_INTERNAL_SECRET = process.env.BOT_INTERNAL_SECRET;
 const GOOGLE_PLAY_URL = 'https://play.google.com/store/apps/details?id=com.gravystream.gravy';
 const APPLE_STORE_URL = 'https://apps.apple.com/app/gravy-mobile/id6753959895';
+
+/**
+ * Save a pending referral server-side so it's available when the
+ * user opens the Mini App (Telegram strips URL params from WebApp buttons)
+ */
+async function savePendingReferral(telegramId, referralCode) {
+    try {
+        const response = await fetch(`${API_BASE}/api/auth/save-referral`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                telegramId,
+                referralCode,
+                secret: BOT_INTERNAL_SECRET
+            })
+        });
+        const data = await response.json();
+        if (data.success) {
+            console.log(`[Bot] Saved pending referral for ${telegramId}: ${referralCode}`);
+        } else {
+            console.error(`[Bot] Failed to save pending referral:`, data.error);
+        }
+    } catch (err) {
+        console.error(`[Bot] Error saving pending referral:`, err.message);
+    }
+}
 
 // ============================================================
 // /start command — Entry point for new and returning users
@@ -26,7 +54,6 @@ bot.start(async (ctx) => {
         referralCode = payload.replace('ref_', '');
     }
 
-    // Pass referral code as URL query param — Telegram WebApp buttons preserve these
     const webAppUrl = referralCode
         ? `${WEBAPP_URL}?ref=${referralCode}`
         : WEBAPP_URL;
@@ -34,6 +61,11 @@ bot.start(async (ctx) => {
     const firstName = ctx.from.first_name || 'there';
 
     console.log(`[Bot] /start from ${ctx.from.id} (${firstName}), payload: ${payload || 'none'}, webAppUrl: ${webAppUrl}`);
+
+    // Save referral code server-side so the Mini App can pick it up
+    if (referralCode) {
+        savePendingReferral(ctx.from.id, referralCode);
+    }
 
     await ctx.reply(
         `🎉 Welcome to Gravy Referral Programme, ${firstName}!\n\n` +

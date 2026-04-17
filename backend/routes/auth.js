@@ -13,6 +13,45 @@ const { generateReferralCode, registerReferralChain, distributeEarnings } = requ
 const { verifyOnboarding } = require('../services/gravyApi');
 
 /**
+ * POST /api/auth/save-referral
+ * Called by the bot when a user clicks a referral link (/start ref_CODE).
+ * Saves the referral code server-side so it's available when the user
+ * opens the Mini App (since Telegram strips URL params from WebApp buttons).
+ *
+ * Body: { telegramId: number, referralCode: string }
+ * Auth: Internal secret (BOT_INTERNAL_SECRET)
+ */
+router.post('/save-referral', async (req, res) => {
+    const { telegramId, referralCode, secret } = req.body;
+
+    // Simple shared-secret auth between bot and API
+    if (secret !== process.env.BOT_INTERNAL_SECRET) {
+        return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    if (!telegramId || !referralCode) {
+        return res.status(400).json({ error: 'telegramId and referralCode required' });
+    }
+
+    try {
+        // Upsert: save or update the pending referral for this telegram user
+        await pool.query(
+            `INSERT INTO pending_referrals (telegram_id, referral_code)
+             VALUES ($1, $2)
+             ON CONFLICT (telegram_id)
+             DO UPDATE SET referral_code = $2, created_at = CURRENT_TIMESTAMP`,
+            [telegramId, referralCode]
+        );
+
+        console.log(`[Auth] Saved pending referral: telegramId=${telegramId}, code=${referralCode}`);
+        return res.json({ success: true });
+    } catch (error) {
+        console.error('[Auth] Save referral error:', error);
+        return res.status(500).json({ error: 'Failed to save referral' });
+    }
+});
+
+/**
  * POST /api/auth/register
  * Register or retrieve a user when they open the Mini App
  *
@@ -20,7 +59,26 @@ const { verifyOnboarding } = require('../services/gravyApi');
  */
 router.post('/register', telegramAuthMiddleware, async (req, res) => {
     const { id: telegramId, username, first_name, last_name } = req.telegramUser;
-    const { referralCode } = req.body;
+    let { referralCode } = req.body;
+
+    // Check for server-side pending referral (saved by bot when user clicked a referral link)
+    if (!referralCode) {
+        try {
+            const pendingResult = await pool.query(
+                'SELECT referral_code FROM pending_referrals WHERE telegram_id = $1',
+                [telegramId]
+            );
+            if (pendingResult.rows.length > 0) {
+                referralCode = pendingResult.rows[0].referral_code;
+                console.log(`[Auth] Found pending referral for telegramId=${telegramId}: ${referralCode}`);
+                // Clean up the pending referral
+                await pool.query('DELETE FROM pending_referrals WHERE telegram_id = $1', [telegramId]);
+            }
+        } catch (pendingErr) {
+            console.error('[Auth] Pending referral lookup error:', pendingErr);
+            // Non-fatal — continue without referral code
+        }
+    }
 
     console.log(`[Auth] Registration attempt: telegramId=${telegramId}, username=${username}, referralCode=${referralCode || 'NONE'}`);
 

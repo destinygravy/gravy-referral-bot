@@ -220,6 +220,20 @@ async function initDbIfNeeded() {
         }
     }
 
+    // Create pending_referrals table (for bot → API referral handoff)
+    try {
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS pending_referrals (
+                telegram_id BIGINT PRIMARY KEY,
+                referral_code VARCHAR(10) NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        console.log('✅ Pending referrals table ready');
+    } catch (pendingErr) {
+        console.error('⚠️  Pending referrals table error:', pendingErr.message);
+    }
+
     // Always run admin schema (uses IF NOT EXISTS)
     try {
         const adminSchema = fs.readFileSync(
