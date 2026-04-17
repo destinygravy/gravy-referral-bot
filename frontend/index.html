@@ -383,6 +383,8 @@
             font-size: 13px;
             color: var(--primary-light);
             cursor: pointer;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
         }
 
         /* ============================================================
@@ -423,6 +425,8 @@
             font-weight: 600;
             cursor: pointer;
             white-space: nowrap;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
         }
 
         .share-buttons {
@@ -593,6 +597,8 @@
             background: var(--bg-card);
             color: var(--text-secondary);
             transition: all 0.2s;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
         }
 
         .leaderboard-tab.active {
@@ -800,7 +806,7 @@
             <label>Your Gravy Virtual Account Number</label>
             <input type="text" id="gravyAccountInput" placeholder="Enter your virtual account number">
         </div>
-        <button class="btn btn-primary" id="verifyBtn" onclick="verifyOnboarding()">
+        <button class="btn btn-primary" id="verifyBtn">
             ✅ Verify My Account
         </button>
     </div>
@@ -867,7 +873,7 @@
     <div class="section">
         <div class="section-header">
             <span class="section-title">Recent Activity</span>
-            <span class="section-action" onclick="switchTab('wallet')">See all</span>
+            <span class="section-action" id="seeAllBtn">See all</span>
         </div>
         <div class="activity-list" id="recentActivity">
             <div class="empty-state">
@@ -895,13 +901,13 @@
         <div style="font-size: 12px; color: var(--text-secondary);">Share this with friends to start earning</div>
         <div class="referral-link-box">
             <span class="referral-link-text" id="referralLinkText">Loading...</span>
-            <button class="copy-btn" onclick="copyReferralLink()">Copy</button>
+            <button class="copy-btn" id="copyBtn">Copy</button>
         </div>
         <div class="share-buttons">
-            <button class="btn btn-primary" onclick="shareToTelegram()" style="font-size: 14px;">
+            <button class="btn btn-primary" id="shareTelegramBtn" style="font-size: 14px;">
                 📤 Share on Telegram
             </button>
-            <button class="btn btn-secondary" onclick="shareGeneral()" style="font-size: 14px;">
+            <button class="btn btn-secondary" id="shareGeneralBtn" style="font-size: 14px;">
                 🔗 Share Link
             </button>
         </div>
@@ -912,7 +918,7 @@
         <div class="onboarding-card">
             <h3>🔒 Verify First</h3>
             <p>You need to complete your Gravy onboarding before you can start referring others.</p>
-            <button class="btn btn-primary" onclick="switchTab('home')">Go to Verification</button>
+            <button class="btn btn-primary" id="goVerifyBtn">Go to Verification</button>
         </div>
     </div>
 
@@ -998,9 +1004,9 @@
         </div>
 
         <div class="leaderboard-tabs">
-            <button class="leaderboard-tab active" onclick="loadLeaderboard('all', this)">All Time</button>
-            <button class="leaderboard-tab" onclick="loadLeaderboard('month', this)">This Month</button>
-            <button class="leaderboard-tab" onclick="loadLeaderboard('week', this)">This Week</button>
+            <button class="leaderboard-tab active" data-period="all">All Time</button>
+            <button class="leaderboard-tab" data-period="month">This Month</button>
+            <button class="leaderboard-tab" data-period="week">This Week</button>
         </div>
     </div>
 
@@ -1054,23 +1060,23 @@
      BOTTOM NAVIGATION
      ============================================================ -->
 <nav class="bottom-nav">
-    <button class="nav-item active" onclick="switchTab('home')" data-tab="home">
+    <button class="nav-item active" data-tab="home">
         <span class="nav-icon">🏠</span>
         <span class="nav-label">Home</span>
     </button>
-    <button class="nav-item" onclick="switchTab('refer')" data-tab="refer">
+    <button class="nav-item" data-tab="refer">
         <span class="nav-icon">🔗</span>
         <span class="nav-label">Refer</span>
     </button>
-    <button class="nav-item" onclick="switchTab('tree')" data-tab="tree">
+    <button class="nav-item" data-tab="tree">
         <span class="nav-icon">🌳</span>
         <span class="nav-label">Network</span>
     </button>
-    <button class="nav-item" onclick="switchTab('leaderboard')" data-tab="leaderboard">
+    <button class="nav-item" data-tab="leaderboard">
         <span class="nav-icon">🏆</span>
         <span class="nav-label">Ranks</span>
     </button>
-    <button class="nav-item" onclick="switchTab('wallet')" data-tab="wallet">
+    <button class="nav-item" data-tab="wallet">
         <span class="nav-icon">💰</span>
         <span class="nav-label">Wallet</span>
     </button>
@@ -1506,19 +1512,78 @@
         if (tg?.HapticFeedback) tg.HapticFeedback.selectionChanged();
     }
 
-    // Attach nav listeners for Telegram WebView compatibility
-    document.querySelectorAll('.nav-item[data-tab]').forEach(btn => {
-        btn.addEventListener('click', (e) => {
+    // ============================================================
+    // TELEGRAM WEBVIEW BUTTON FIX
+    // Telegram WebView doesn't reliably fire onclick attributes.
+    // We attach both 'click' and 'touchend' listeners programmatically
+    // to ALL interactive buttons in the app.
+    // ============================================================
+    function attachTelegramTap(element, handler) {
+        if (!element) return;
+        let touchHandled = false;
+
+        element.addEventListener('touchend', (e) => {
             e.preventDefault();
             e.stopPropagation();
+            touchHandled = true;
+            handler(e);
+            // Reset after a short delay to allow click fallback on non-touch
+            setTimeout(() => { touchHandled = false; }, 300);
+        }, { passive: false });
+
+        element.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            // Only fire if touchend didn't already handle it
+            if (!touchHandled) {
+                handler(e);
+            }
+        });
+    }
+
+    // --- Bottom Navigation ---
+    document.querySelectorAll('.nav-item[data-tab]').forEach(btn => {
+        attachTelegramTap(btn, () => {
             const tab = btn.getAttribute('data-tab');
             if (tab) switchTab(tab);
         });
-        // Also handle touchend for Telegram WebView
-        btn.addEventListener('touchend', (e) => {
-            e.preventDefault();
-            const tab = btn.getAttribute('data-tab');
-            if (tab) switchTab(tab);
+    });
+
+    // --- Verify Account Button ---
+    attachTelegramTap(document.getElementById('verifyBtn'), () => {
+        verifyOnboarding();
+    });
+
+    // --- Copy Referral Link ---
+    attachTelegramTap(document.getElementById('copyBtn'), () => {
+        copyReferralLink();
+    });
+
+    // --- Share on Telegram ---
+    attachTelegramTap(document.getElementById('shareTelegramBtn'), () => {
+        shareToTelegram();
+    });
+
+    // --- Share General ---
+    attachTelegramTap(document.getElementById('shareGeneralBtn'), () => {
+        shareGeneral();
+    });
+
+    // --- "See all" link (Recent Activity → Wallet) ---
+    attachTelegramTap(document.getElementById('seeAllBtn'), () => {
+        switchTab('wallet');
+    });
+
+    // --- "Go to Verification" button on Refer page ---
+    attachTelegramTap(document.getElementById('goVerifyBtn'), () => {
+        switchTab('home');
+    });
+
+    // --- Leaderboard period tabs ---
+    document.querySelectorAll('.leaderboard-tab[data-period]').forEach(btn => {
+        attachTelegramTap(btn, () => {
+            const period = btn.getAttribute('data-period');
+            if (period) loadLeaderboard(period, btn);
         });
     });
 
