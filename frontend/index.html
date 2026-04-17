@@ -1695,7 +1695,7 @@
                 btn.className = 'withdrawal-amount-btn';
                 btn.textContent = `Withdraw ₦${formatMoney(amount)}`;
                 btn.disabled = !withdrawalInfo.canWithdraw;
-                btn.addEventListener('click', () => requestWithdrawal(amount));
+                attachTelegramTap(btn, () => requestWithdrawal(amount));
                 tieredContainer.appendChild(btn);
             });
         }
@@ -1717,19 +1717,8 @@
         }
 
         // Re-attach button listeners for unlimited tier
-        if (withdrawalInfo.isUnlimited) {
-            const btn5000 = document.getElementById('withdrawBtn5000');
-            const btn10000 = document.getElementById('withdrawBtn10000');
-
-            btn5000.removeEventListener('click', btn5000._handler);
-            btn10000.removeEventListener('click', btn10000._handler);
-
-            btn5000._handler = () => requestWithdrawal(5000);
-            btn10000._handler = () => requestWithdrawal(10000);
-
-            btn5000.addEventListener('click', btn5000._handler);
-            btn10000.addEventListener('click', btn10000._handler);
-        }
+        // Note: attachTelegramTap for static buttons is already done at page load.
+        // No need to re-attach here since the initial attachTelegramTap handles it.
     }
 
     async function requestWithdrawal(amount) {
@@ -1738,7 +1727,13 @@
             return;
         }
 
-        const btn = event.target;
+        // Find the button that was tapped (works with both click and touchend)
+        const allBtns = document.querySelectorAll('.withdrawal-amount-btn');
+        let btn = null;
+        allBtns.forEach(b => {
+            if (b.textContent.includes(formatMoney(amount))) btn = b;
+        });
+        if (!btn) return;
         const originalText = btn.textContent;
         btn.disabled = true;
         btn.textContent = '⏳ Processing...';
