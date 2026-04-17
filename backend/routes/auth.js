@@ -165,16 +165,31 @@ router.post('/verify-onboarding', telegramAuthMiddleware, async (req, res) => {
             });
         }
 
-        // Mark user as onboarded
+        // Extract verified name from Gravy account (e.g. "Gravy - Oseni Azeez" → "Oseni Azeez")
+        let verifiedFirstName = user.first_name;
+        let verifiedLastName = user.last_name;
+        if (verification.accountData && verification.accountData.fullName) {
+            const nameParts = verification.accountData.fullName.split(' ');
+            if (nameParts.length >= 2) {
+                verifiedFirstName = nameParts[0];
+                verifiedLastName = nameParts.slice(1).join(' ');
+            } else if (nameParts.length === 1) {
+                verifiedFirstName = nameParts[0];
+            }
+        }
+
+        // Mark user as onboarded and update name from Gravy account
         const updatedUser = await pool.query(
             `UPDATE users
              SET is_onboarded = TRUE,
                  gravy_account_number = $1,
+                 first_name = $2,
+                 last_name = $3,
                  onboarding_verified_at = CURRENT_TIMESTAMP,
                  updated_at = CURRENT_TIMESTAMP
-             WHERE id = $2
+             WHERE id = $4
              RETURNING *`,
-            [gravyAccountNumber.trim(), user.id]
+            [gravyAccountNumber.trim(), verifiedFirstName, verifiedLastName, user.id]
         );
 
         // Distribute referral earnings to ancestors

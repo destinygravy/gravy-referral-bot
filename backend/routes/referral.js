@@ -112,13 +112,17 @@ router.get('/link', telegramAuthMiddleware, async (req, res) => {
         }
 
         const botUsername = process.env.BOT_USERNAME;
+        const googlePlayUrl = 'https://play.google.com/store/apps/details?id=com.gravystream.gravy';
+        const appleStoreUrl = 'https://apps.apple.com/app/gravy-mobile/id6753959895';
         const referralLink = `https://t.me/${botUsername}?start=ref_${user.referral_code}`;
 
         return res.json({
             success: true,
             referralCode: user.referral_code,
             referralLink,
-            shareText: `🚀 Join Gravy Mobile and earn money! Download now using my link and we both earn rewards.\n\n${referralLink}`
+            googlePlayUrl,
+            appleStoreUrl,
+            shareText: `🚀 Join Gravy Mobile and start earning!\n\n📲 Download Gravy:\n🤖 Android: ${googlePlayUrl}\n🍎 iPhone: ${appleStoreUrl}\n\n🎁 Then open my referral link to claim your bonus:\n${referralLink}`
         });
 
     } catch (error) {
