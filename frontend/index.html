@@ -737,6 +737,138 @@
         .toast.error { border-color: var(--danger); }
 
         /* ============================================================
+           WITHDRAWAL SECTION
+           ============================================================ */
+        .withdrawal-card {
+            background: linear-gradient(135deg, #1E1E36, #2A1E4E);
+            border: 1px solid var(--primary);
+            border-radius: var(--radius);
+            padding: 20px;
+            margin: 16px;
+        }
+
+        .withdrawal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .withdrawal-tier-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(108, 60, 225, 0.2);
+            color: var(--primary-light);
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .withdrawal-tier-badge.unlimited {
+            background: rgba(16, 185, 129, 0.2);
+            color: var(--secondary);
+        }
+
+        .withdrawal-amounts {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+
+        .withdrawal-amount-btn {
+            width: 100%;
+            padding: 14px 20px;
+            border: 2px solid var(--primary);
+            background: transparent;
+            color: var(--primary-light);
+            border-radius: var(--radius-sm);
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .withdrawal-amount-btn:hover:not(:disabled) {
+            background: rgba(108, 60, 225, 0.1);
+        }
+
+        .withdrawal-amount-btn:active:not(:disabled) {
+            transform: scale(0.98);
+        }
+
+        .withdrawal-amount-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .withdrawal-status {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: var(--radius-sm);
+            padding: 12px 16px;
+            margin-bottom: 16px;
+            font-size: 13px;
+            border-left: 3px solid var(--warning-bg);
+        }
+
+        .withdrawal-status.pending {
+            border-left-color: var(--accent);
+            color: var(--accent);
+        }
+
+        .withdrawal-status.info {
+            border-left-color: var(--primary);
+            color: var(--text-secondary);
+        }
+
+        .withdrawal-progress {
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid var(--border);
+        }
+
+        .progress-bar-container {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            height: 8px;
+            overflow: hidden;
+            margin: 8px 0;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary), var(--primary-light));
+            transition: width 0.3s;
+        }
+
+        .progress-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .withdrawal-info-text {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+            line-height: 1.4;
+        }
+
+        .withdrawal-button-group {
+            display: flex;
+            gap: 10px;
+        }
+
+        .withdrawal-button-group .btn {
+            flex: 1;
+        }
+
+        /* ============================================================
            RESPONSIVE
            ============================================================ */
         @media (min-width: 400px) {
@@ -1042,6 +1174,68 @@
         </div>
     </div>
 
+    <!-- Withdrawal Section -->
+    <div class="section">
+        <div class="withdrawal-card" id="withdrawalCard" style="display:none;">
+            <div class="withdrawal-header">
+                <div>
+                    <div style="font-weight: 600; margin-bottom: 4px;">Request Withdrawal</div>
+                    <div style="font-size: 12px; color: var(--text-secondary);">Tiered withdrawal system</div>
+                </div>
+                <div class="withdrawal-tier-badge" id="tierBadge">Tier 1</div>
+            </div>
+
+            <!-- Pending withdrawal warning -->
+            <div id="pendingWithdrawalNotice" class="withdrawal-status pending" style="display:none;">
+                💤 You have a pending withdrawal. Please wait for admin review.
+            </div>
+
+            <!-- Insufficient balance warning -->
+            <div id="insufficientBalanceNotice" class="withdrawal-status" style="display:none;">
+                ❌ Insufficient balance for current tier withdrawal.
+            </div>
+
+            <!-- Not onboarded warning -->
+            <div id="notOnboardedNotice" class="withdrawal-status" style="display:none;">
+                🔒 You must complete Gravy onboarding to withdraw.
+            </div>
+
+            <!-- Withdrawal amounts for tiers 1-4 -->
+            <div id="tieredAmountsContainer" class="withdrawal-amounts"></div>
+
+            <!-- Unlimited tier buttons (tier 5+) -->
+            <div id="unlimitedAmountsContainer" class="withdrawal-amounts" style="display:none;">
+                <button class="withdrawal-amount-btn" id="withdrawBtn5000">Withdraw ₦5,000</button>
+                <button class="withdrawal-amount-btn" id="withdrawBtn10000">Withdraw ₦10,000</button>
+            </div>
+
+            <!-- Progress info -->
+            <div class="withdrawal-progress" id="withdrawalProgress">
+                <div class="withdrawal-info-text" id="tierInfoText"></div>
+                <div class="progress-bar-container">
+                    <div class="progress-bar" id="progressBar"></div>
+                </div>
+                <div class="progress-label">
+                    <span id="tierProgressLabel"></span>
+                    <span id="tierProgressStatus"></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Not verified message -->
+        <div id="withdrawalNotVerified" class="withdrawal-card" style="display:none;">
+            <div style="text-align: center;">
+                <div style="font-size: 36px; margin-bottom: 12px;">🔒</div>
+                <div style="font-weight: 600; margin-bottom: 4px;">Withdrawal Locked</div>
+                <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px;">
+                    Complete your Gravy onboarding to unlock withdrawals
+                </div>
+                <button class="btn btn-primary" id="goVerifyBtnWallet">Complete Verification</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Transaction History -->
     <div class="section">
         <div class="section-header">
             <span class="section-title">Transaction History</span>
@@ -1231,7 +1425,8 @@
             loadRecentActivity(),
             loadLeaderboard('all'),
             loadReferralTree(),
-            loadTransactions()
+            loadTransactions(),
+            loadWithdrawalInfo()
         ]);
     }
 
@@ -1430,6 +1625,143 @@
     }
 
     // ============================================================
+    // WITHDRAWAL INFO & MANAGEMENT
+    // ============================================================
+    async function loadWithdrawalInfo() {
+        try {
+            const data = await apiCall('/wallet/withdrawal-info');
+            if (data.success) {
+                renderWithdrawalUI(data.withdrawal);
+            }
+        } catch (e) {
+            console.error('Withdrawal info error:', e);
+        }
+    }
+
+    function renderWithdrawalUI(withdrawalInfo) {
+        const card = document.getElementById('withdrawalCard');
+        const notVerified = document.getElementById('withdrawalNotVerified');
+        const tierBadge = document.getElementById('tierBadge');
+        const pendingNotice = document.getElementById('pendingWithdrawalNotice');
+        const insufficientNotice = document.getElementById('insufficientBalanceNotice');
+        const notOnboardedNotice = document.getElementById('notOnboardedNotice');
+        const tieredContainer = document.getElementById('tieredAmountsContainer');
+        const unlimitedContainer = document.getElementById('unlimitedAmountsContainer');
+        const tierInfoText = document.getElementById('tierInfoText');
+        const tierProgressLabel = document.getElementById('tierProgressLabel');
+        const tierProgressStatus = document.getElementById('tierProgressStatus');
+        const progressBar = document.getElementById('progressBar');
+
+        // Show/hide based on onboarding status
+        if (!withdrawalInfo.isOnboarded) {
+            card.style.display = 'none';
+            notVerified.style.display = 'block';
+            return;
+        }
+
+        card.style.display = 'block';
+        notVerified.style.display = 'none';
+
+        // Update tier badge
+        if (withdrawalInfo.isUnlimited) {
+            tierBadge.textContent = '♾️ Unlimited';
+            tierBadge.className = 'withdrawal-tier-badge unlimited';
+        } else {
+            tierBadge.textContent = `Tier ${withdrawalInfo.tierNumber}`;
+            tierBadge.className = 'withdrawal-tier-badge';
+        }
+
+        // Show/hide notices
+        pendingNotice.style.display = withdrawalInfo.hasPendingWithdrawal ? 'block' : 'none';
+        insufficientNotice.style.display = (!withdrawalInfo.canWithdraw && !withdrawalInfo.hasPendingWithdrawal) ? 'block' : 'none';
+        notOnboardedNotice.style.display = 'none'; // Already checked above
+
+        // Render tier/unlimited buttons
+        if (withdrawalInfo.isUnlimited) {
+            tieredContainer.style.display = 'none';
+            unlimitedContainer.style.display = 'flex';
+
+            const btn5000 = document.getElementById('withdrawBtn5000');
+            const btn10000 = document.getElementById('withdrawBtn10000');
+            btn5000.disabled = !withdrawalInfo.canWithdraw;
+            btn10000.disabled = !withdrawalInfo.canWithdraw;
+        } else {
+            unlimitedContainer.style.display = 'none';
+            tieredContainer.style.display = 'flex';
+            tieredContainer.innerHTML = '';
+
+            withdrawalInfo.allowedAmounts.forEach(amount => {
+                const btn = document.createElement('button');
+                btn.className = 'withdrawal-amount-btn';
+                btn.textContent = `Withdraw ₦${formatMoney(amount)}`;
+                btn.disabled = !withdrawalInfo.canWithdraw;
+                btn.addEventListener('click', () => requestWithdrawal(amount));
+                tieredContainer.appendChild(btn);
+            });
+        }
+
+        // Update progress info
+        if (withdrawalInfo.progressToNextTier) {
+            const progress = withdrawalInfo.progressToNextTier;
+            tierInfoText.textContent = `Complete ${progress.completionsToNext} more withdrawal(s) to reach Tier ${progress.next} (₦${formatMoney(progress.nextAmount)})`;
+            tierProgressLabel.textContent = `Tier ${progress.current}`;
+            tierProgressStatus.textContent = `${progress.current}/5`;
+
+            const progressPercent = (progress.current / 5) * 100;
+            progressBar.style.width = progressPercent + '%';
+        } else if (withdrawalInfo.isUnlimited) {
+            tierInfoText.textContent = 'You\'ve reached the unlimited tier! You can now withdraw ₦5,000 or ₦10,000 anytime.';
+            tierProgressLabel.textContent = 'Tier 5 (Unlimited)';
+            tierProgressStatus.textContent = '5/5';
+            progressBar.style.width = '100%';
+        }
+
+        // Re-attach button listeners for unlimited tier
+        if (withdrawalInfo.isUnlimited) {
+            const btn5000 = document.getElementById('withdrawBtn5000');
+            const btn10000 = document.getElementById('withdrawBtn10000');
+
+            btn5000.removeEventListener('click', btn5000._handler);
+            btn10000.removeEventListener('click', btn10000._handler);
+
+            btn5000._handler = () => requestWithdrawal(5000);
+            btn10000._handler = () => requestWithdrawal(10000);
+
+            btn5000.addEventListener('click', btn5000._handler);
+            btn10000.addEventListener('click', btn10000._handler);
+        }
+    }
+
+    async function requestWithdrawal(amount) {
+        // Double-check with user
+        if (!confirm(`Request withdrawal of ₦${formatMoney(amount)}?`)) {
+            return;
+        }
+
+        const btn = event.target;
+        const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = '⏳ Processing...';
+
+        try {
+            const data = await apiCall('/wallet/withdraw', 'POST', { amount });
+            if (data.success) {
+                showToast(`Withdrawal request submitted! Please wait for admin approval.`, 'success');
+                if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+
+                // Reload withdrawal info after a short delay
+                setTimeout(() => loadWithdrawalInfo(), 1500);
+            }
+        } catch (error) {
+            showToast(error.message, 'error');
+            if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = originalText;
+        }
+    }
+
+    // ============================================================
     // VERIFY ONBOARDING
     // ============================================================
     async function verifyOnboarding() {
@@ -1596,12 +1928,26 @@
         switchTab('home');
     });
 
+    // --- "Go to Verification" button on Wallet page ---
+    attachTelegramTap(document.getElementById('goVerifyBtnWallet'), () => {
+        switchTab('home');
+    });
+
     // --- Leaderboard period tabs ---
     document.querySelectorAll('.leaderboard-tab[data-period]').forEach(btn => {
         attachTelegramTap(btn, () => {
             const period = btn.getAttribute('data-period');
             if (period) loadLeaderboard(period, btn);
         });
+    });
+
+    // --- Withdrawal buttons (Unlimited Tier) ---
+    attachTelegramTap(document.getElementById('withdrawBtn5000'), () => {
+        requestWithdrawal(5000);
+    });
+
+    attachTelegramTap(document.getElementById('withdrawBtn10000'), () => {
+        requestWithdrawal(10000);
     });
 
     // ============================================================

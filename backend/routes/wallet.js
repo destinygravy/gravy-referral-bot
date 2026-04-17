@@ -114,8 +114,46 @@ router.get('/transactions', telegramAuthMiddleware, async (req, res) => {
 });
 
 /**
+ * Tiered withdrawal amounts
+ * Users progress through tiers with each completed withdrawal
+ */
+const WITHDRAWAL_TIERS = [
+    { tier: 1, amount: 1000 },  // 0 completed → tier 1 (₦1,000)
+    { tier: 2, amount: 2000 },  // 1 completed → tier 2 (₦2,000)
+    { tier: 3, amount: 3000 },  // 2 completed → tier 3 (₦3,000)
+    { tier: 4, amount: 5000 },  // 3 completed → tier 4 (₦5,000)
+    { tier: 5, amount: 10000 }, // 4 completed → tier 5 (₦10,000)
+    // 5+ completed → unlimited (can choose ₦5,000 or ₦10,000)
+];
+
+/**
+ * Helper: Get current tier info based on completed withdrawals
+ */
+function getTierInfo(completedWithdrawals) {
+    if (completedWithdrawals < WITHDRAWAL_TIERS.length) {
+        const tier = WITHDRAWAL_TIERS[completedWithdrawals];
+        return {
+            tierNumber: tier.tier,
+            isUnlimited: false,
+            allowedAmounts: [tier.amount],
+            nextTierAmount: completedWithdrawals + 1 < WITHDRAWAL_TIERS.length
+                ? WITHDRAWAL_TIERS[completedWithdrawals + 1].amount
+                : null
+        };
+    } else {
+        // Unlimited tier: can choose ₦5,000 or ₦10,000
+        return {
+            tierNumber: 5,
+            isUnlimited: true,
+            allowedAmounts: [5000, 10000],
+            nextTierAmount: null
+        };
+    }
+}
+
+/**
  * POST /api/wallet/withdraw
- * Request a withdrawal (future feature, ready when you add payout)
+ * Request a withdrawal with tiered amounts
  *
  * Body: { amount: number }
  */
@@ -123,11 +161,9 @@ router.post('/withdraw', telegramAuthMiddleware, async (req, res) => {
     const { id: telegramId } = req.telegramUser;
     const { amount } = req.body;
 
-    const MIN_WITHDRAWAL = parseFloat(process.env.MIN_WITHDRAWAL || '500');
-
-    if (!amount || amount < MIN_WITHDRAWAL) {
+    if (!amount || typeof amount !== 'number' || amount <= 0) {
         return res.status(400).json({
-            error: `Minimum withdrawal amount is ₦${MIN_WITHDRAWAL}`
+            error: 'Invalid amount'
         });
     }
 
@@ -143,13 +179,57 @@ router.post('/withdraw', telegramAuthMiddleware, async (req, res) => {
 
         const user = userResult.rows[0];
 
+        // Check onboarding
         if (!user.is_onboarded || !user.gravy_account_number) {
             return res.status(403).json({
-                error: 'You must complete onboarding and have a verified Gravy account.'
+                error: 'You must complete onboarding and have a verified Gravy account to withdraw.'
             });
         }
 
-        // Check available balance (excluding pending withdrawals)
+        // Count completed withdrawals (status = 'processed')
+        const completedResult = await pool.query(
+            `SELECT COUNT(*) as count FROM withdrawal_requests
+             WHERE user_id = $1 AND status = 'processed'`,
+            [user.id]
+        );
+        const completedWithdrawals = parseInt(completedResult.rows[0].count);
+
+        // Get tier info
+        const tierInfo = getTierInfo(completedWithdrawals);
+
+        // Validate amount against tier
+        if (!tierInfo.allowedAmounts.includes(amount)) {
+            if (tierInfo.isUnlimited) {
+                return res.status(400).json({
+                    error: `Unlimited tier: You can only withdraw ₦5,000 or ₦10,000. You requested ₦${amount}.`,
+                    tier: tierInfo.tierNumber,
+                    isUnlimited: true,
+                    allowedAmounts: tierInfo.allowedAmounts
+                });
+            } else {
+                return res.status(400).json({
+                    error: `Tier ${tierInfo.tierNumber}: You must withdraw exactly ₦${tierInfo.allowedAmounts[0]}. You requested ₦${amount}.`,
+                    tier: tierInfo.tierNumber,
+                    allowedAmounts: tierInfo.allowedAmounts
+                });
+            }
+        }
+
+        // Check for existing pending/approved withdrawal
+        const existingWithdrawalResult = await pool.query(
+            `SELECT id FROM withdrawal_requests
+             WHERE user_id = $1 AND status IN ('pending', 'approved')
+             LIMIT 1`,
+            [user.id]
+        );
+
+        if (existingWithdrawalResult.rows.length > 0) {
+            return res.status(400).json({
+                error: 'You already have a pending or approved withdrawal. Please wait for it to be processed.'
+            });
+        }
+
+        // Check available balance (excluding pending/approved withdrawals)
         const pendingResult = await pool.query(
             `SELECT COALESCE(SUM(amount), 0) AS pending
              FROM withdrawal_requests
@@ -161,7 +241,10 @@ router.post('/withdraw', telegramAuthMiddleware, async (req, res) => {
 
         if (amount > availableBalance) {
             return res.status(400).json({
-                error: `Insufficient balance. Available: ₦${availableBalance.toFixed(2)}`
+                error: `Insufficient balance. You have ₦${availableBalance.toFixed(2)} available. Tier ${tierInfo.tierNumber} requires ₦${amount}.`,
+                availableBalance: availableBalance,
+                required: amount,
+                shortfall: amount - availableBalance
             });
         }
 
@@ -174,12 +257,105 @@ router.post('/withdraw', telegramAuthMiddleware, async (req, res) => {
 
         return res.json({
             success: true,
-            message: `Withdrawal request of ₦${amount.toFixed(2)} submitted. It will be reviewed and processed to your Gravy account.`
+            message: `Withdrawal request of ₦${amount.toFixed(2)} submitted successfully. It will be reviewed by admin and processed to your Gravy account.`,
+            tier: tierInfo.tierNumber,
+            amount: amount
         });
 
     } catch (error) {
         console.error('[Wallet] Withdrawal error:', error);
         return res.status(500).json({ error: 'Withdrawal request failed' });
+    }
+});
+
+/**
+ * GET /api/wallet/withdrawal-info
+ * Get current withdrawal tier info and eligibility status
+ */
+router.get('/withdrawal-info', telegramAuthMiddleware, async (req, res) => {
+    const { id: telegramId } = req.telegramUser;
+
+    try {
+        const userResult = await pool.query(
+            'SELECT * FROM users WHERE telegram_id = $1',
+            [telegramId]
+        );
+
+        if (userResult.rows.length === 0) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        const user = userResult.rows[0];
+
+        // Count completed withdrawals
+        const completedResult = await pool.query(
+            `SELECT COUNT(*) as count FROM withdrawal_requests
+             WHERE user_id = $1 AND status = 'processed'`,
+            [user.id]
+        );
+        const completedWithdrawals = parseInt(completedResult.rows[0].count);
+
+        // Get tier info
+        const tierInfo = getTierInfo(completedWithdrawals);
+
+        // Check for pending/approved withdrawal
+        const pendingWithdrawalResult = await pool.query(
+            `SELECT id, amount, status FROM withdrawal_requests
+             WHERE user_id = $1 AND status IN ('pending', 'approved')
+             LIMIT 1`,
+            [user.id]
+        );
+        const hasPendingWithdrawal = pendingWithdrawalResult.rows.length > 0;
+
+        // Get available balance
+        const pendingResult = await pool.query(
+            `SELECT COALESCE(SUM(amount), 0) AS pending
+             FROM withdrawal_requests
+             WHERE user_id = $1 AND status IN ('pending', 'approved')`,
+            [user.id]
+        );
+
+        const availableBalance = parseFloat(user.wallet_balance) - parseFloat(pendingResult.rows[0].pending);
+
+        // Check if can withdraw now
+        const canWithdraw = user.is_onboarded
+            && !hasPendingWithdrawal
+            && availableBalance >= Math.min(...tierInfo.allowedAmounts);
+
+        // Calculate progress to next tier
+        let progressToNextTier = null;
+        if (!tierInfo.isUnlimited && tierInfo.nextTierAmount) {
+            progressToNextTier = {
+                current: completedWithdrawals,
+                next: completedWithdrawals + 1,
+                currentAmount: tierInfo.allowedAmounts[0],
+                nextAmount: tierInfo.nextTierAmount,
+                completionsToNext: 1
+            };
+        }
+
+        return res.json({
+            success: true,
+            withdrawal: {
+                tierNumber: tierInfo.tierNumber,
+                isUnlimited: tierInfo.isUnlimited,
+                allowedAmounts: tierInfo.allowedAmounts,
+                completedWithdrawals: completedWithdrawals,
+                canWithdraw: canWithdraw,
+                availableBalance: availableBalance,
+                isOnboarded: user.isOnboarded,
+                hasPendingWithdrawal: hasPendingWithdrawal,
+                pendingWithdrawal: hasPendingWithdrawal ? {
+                    amount: parseFloat(pendingWithdrawalResult.rows[0].amount),
+                    status: pendingWithdrawalResult.rows[0].status
+                } : null,
+                progressToNextTier: progressToNextTier
+            }
+        });
+
+    } catch (error) {
+        console.error('[Wallet] Withdrawal info error:', error);
+        return res.status(500).json({ error: 'Failed to load withdrawal info' });
     }
 });
 

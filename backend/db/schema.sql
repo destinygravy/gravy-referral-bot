@@ -94,6 +94,8 @@ CREATE TABLE withdrawal_requests (
     status VARCHAR(20) DEFAULT 'pending',  -- pending, approved, processed, rejected
     reviewed_by VARCHAR(100),
     reviewed_at TIMESTAMP,
+    processed_at TIMESTAMP,  -- When withdrawal was marked as processed (funds deducted)
+    admin_notes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
