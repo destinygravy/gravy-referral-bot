@@ -145,12 +145,18 @@ router.post('/verify-onboarding', telegramAuthMiddleware, async (req, res) => {
         // Call Gravy API to verify onboarding
         const verification = await verifyOnboarding(gravyAccountNumber.trim());
 
-        // Log the verification attempt
+        // Log the verification attempt (including full API response for audit)
         await pool.query(
             `INSERT INTO onboarding_verifications
-             (user_id, gravy_account_number, api_response_status, verified)
-             VALUES ($1, $2, $3, $4)`,
-            [user.id, gravyAccountNumber.trim(), verification.verified ? 'success' : 'failed', verification.verified]
+             (user_id, gravy_account_number, api_response_status, api_response_body, verified)
+             VALUES ($1, $2, $3, $4, $5)`,
+            [
+                user.id,
+                gravyAccountNumber.trim(),
+                verification.verified ? 'success' : 'failed',
+                verification.apiResponse ? JSON.stringify(verification.apiResponse) : null,
+                verification.verified
+            ]
         );
 
         if (!verification.verified) {

@@ -1,90 +1,131 @@
 /**
- * Gravy Onboarding API Service
+ * Gravy Account Verification Service
  *
- * Communicates with Gravy Mobile's API to verify
- * that a user has completed their onboarding.
+ * Uses Flutterwave's Resolve Account API to verify that a user
+ * has a legitimate Gravy virtual account (powered by Paga).
  *
- * IMPORTANT: Update the API endpoints and authentication
- * to match Gravy's actual API specification.
+ * Verification logic:
+ * 1. Call Flutterwave POST /v3/accounts/resolve with the account number + Paga bank code
+ * 2. Check that the resolved account_name starts with "Gravy/" (Gravy virtual accounts)
+ * 3. Return the verified account data
  */
 
 const axios = require('axios');
 
-const gravyClient = axios.create({
-    baseURL: process.env.GRAVY_API_BASE_URL || 'https://api.gravymobile.com',
-    timeout: 10000,
+const flutterwaveClient = axios.create({
+    baseURL: 'https://api.flutterwave.com',
+    timeout: 15000,
     headers: {
-        'Authorization': `Bearer ${process.env.GRAVY_API_KEY}`,
+        'Authorization': `Bearer ${process.env.FLUTTERWAVE_SECRET_KEY}`,
         'Content-Type': 'application/json'
     }
 });
 
+// Paga bank code on Flutterwave
+const PAGA_BANK_CODE = process.env.PAGA_BANK_CODE || '100002';
+
 /**
- * Verify if a user has completed onboarding on Gravy
+ * Verify if a user has a valid Gravy virtual account
  *
  * @param {string} accountNumber - The user's Gravy virtual account number
- * @returns {Object} { verified: boolean, accountData: Object|null, error: string|null }
+ * @returns {Object} { verified: boolean, accountData: Object|null, apiResponse: Object|null, error: string|null }
  */
 async function verifyOnboarding(accountNumber) {
     try {
-        // -------------------------------------------------------
-        // TODO: Replace this endpoint with Gravy's actual API
-        // This is a placeholder showing the expected contract
-        // -------------------------------------------------------
-        const response = await gravyClient.get(
-            `/api/v1/accounts/${accountNumber}/verify-onboarding`
-        );
+        const response = await flutterwaveClient.post('/v3/accounts/resolve', {
+            account_number: accountNumber,
+            account_bank: PAGA_BANK_CODE
+        });
 
         const { data } = response;
 
-        if (data && data.is_onboarded === true) {
+        // Flutterwave returns { status: "success", data: { account_number, account_name } }
+        if (data && data.status === 'success' && data.data) {
+            const accountName = data.data.account_name || '';
+            const resolvedNumber = data.data.account_number || accountNumber;
+
+            // Check that account name starts with "Gravy/" — confirms it's a Gravy virtual account
+            if (accountName.toLowerCase().startsWith('gravy/')) {
+                return {
+                    verified: true,
+                    accountData: {
+                        accountNumber: resolvedNumber,
+                        accountName: accountName,
+                        fullName: accountName.replace(/^gravy\//i, '').trim()
+                    },
+                    apiResponse: data,
+                    error: null
+                };
+            }
+
+            // Account exists but is NOT a Gravy account
             return {
-                verified: true,
-                accountData: {
-                    accountNumber: data.account_number,
-                    fullName: data.full_name,
-                    email: data.email,
-                    phoneNumber: data.phone_number,
-                    onboardedAt: data.onboarded_at
-                },
-                error: null
+                verified: false,
+                accountData: null,
+                apiResponse: data,
+                error: 'This account is not a Gravy virtual account. Please enter your Gravy account number.'
             };
         }
 
+        // Unexpected response format
         return {
             verified: false,
             accountData: null,
-            error: 'User has not completed onboarding on Gravy'
+            apiResponse: data,
+            error: 'Could not verify account. Please check the account number and try again.'
         };
 
     } catch (error) {
-        // Handle specific API errors
+        // Handle Flutterwave API errors
         if (error.response) {
             const status = error.response.status;
+            const errorData = error.response.data;
+
+            if (status === 400) {
+                console.error('[Flutterwave] Bad request:', errorData);
+                return {
+                    verified: false,
+                    accountData: null,
+                    apiResponse: errorData,
+                    error: 'Invalid account number. Please check and try again.'
+                };
+            }
+
+            if (status === 401 || status === 403) {
+                console.error('[Flutterwave] Authentication error:', errorData);
+                return {
+                    verified: false,
+                    accountData: null,
+                    apiResponse: errorData,
+                    error: 'Verification service temporarily unavailable. Please try again later.'
+                };
+            }
 
             if (status === 404) {
                 return {
                     verified: false,
                     accountData: null,
-                    error: 'Account number not found on Gravy'
+                    apiResponse: errorData,
+                    error: 'Account not found. Please check your account number.'
                 };
             }
 
-            if (status === 401 || status === 403) {
-                console.error('[GravyAPI] Authentication error:', error.response.data);
-                return {
-                    verified: false,
-                    accountData: null,
-                    error: 'API authentication error. Contact support.'
-                };
-            }
+            console.error(`[Flutterwave] API error (${status}):`, errorData);
+            return {
+                verified: false,
+                accountData: null,
+                apiResponse: errorData,
+                error: 'Verification failed. Please try again later.'
+            };
         }
 
-        console.error('[GravyAPI] Verification error:', error.message);
+        // Network / timeout error
+        console.error('[Flutterwave] Network error:', error.message);
         return {
             verified: false,
             accountData: null,
-            error: 'Unable to verify at this time. Please try again later.'
+            apiResponse: null,
+            error: 'Unable to reach verification service. Please check your connection and try again.'
         };
     }
 }
@@ -105,6 +146,7 @@ async function batchVerify(accountNumbers) {
         ...(result.status === 'fulfilled' ? result.value : {
             verified: false,
             accountData: null,
+            apiResponse: null,
             error: 'Verification request failed'
         })
     }));
