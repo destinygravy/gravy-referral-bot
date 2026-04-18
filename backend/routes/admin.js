@@ -666,6 +666,163 @@ router.post('/withdrawals/:id/process', adminAuthMiddleware('admin'), async (req
     }
 });
 
+/**
+ * GET /api/admin/withdrawals/export/csv
+ * Export approved withdrawals as CSV for bulk payment
+ * Query params: status (default 'approved'), dateFrom, dateTo
+ */
+router.get('/withdrawals/export/csv', adminAuthMiddleware('admin'), async (req, res) => {
+    const status = req.query.status || 'approved';
+    const dateFrom = req.query.dateFrom || null;
+    const dateTo = req.query.dateTo || null;
+
+    try {
+        let whereClause = `WHERE w.status = $1`;
+        const params = [status];
+        let paramIdx = 2;
+
+        if (dateFrom) {
+            whereClause += ` AND w.reviewed_at >= $${paramIdx}`;
+            params.push(dateFrom);
+            paramIdx++;
+        }
+        if (dateTo) {
+            whereClause += ` AND w.reviewed_at <= $${paramIdx}::date + INTERVAL '1 day'`;
+            params.push(dateTo);
+            paramIdx++;
+        }
+
+        const result = await pool.query(
+            `SELECT w.id, w.amount, w.destination_account, w.status,
+                    w.created_at, w.reviewed_at, w.admin_notes,
+                    u.first_name, u.last_name, u.telegram_username,
+                    u.telegram_id, u.referral_code, u.gravy_account_number
+             FROM withdrawal_requests w
+             JOIN users u ON u.id = w.user_id
+             ${whereClause}
+             ORDER BY w.reviewed_at ASC`,
+            params
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'No withdrawals found for the selected criteria' });
+        }
+
+        const headers = 'Withdrawal ID,Name,Username,Telegram ID,Referral Code,Amount,Destination Account,Gravy Account,Status,Requested,Approved,Notes\n';
+        const csv = result.rows.map(r =>
+            `${r.id},"${(r.first_name || '') + ' ' + (r.last_name || '')}","${r.telegram_username || ''}",${r.telegram_id},${r.referral_code},${r.amount},${r.destination_account},${r.gravy_account_number || ''},${r.status},${r.created_at},${r.reviewed_at || ''},"${(r.admin_notes || '').replace(/"/g, '""')}"`
+        ).join('\n');
+
+        await logAuditEvent(req.admin.id, 'withdrawals.export', 'withdrawal', null,
+            { count: result.rows.length, status, dateFrom, dateTo }, req);
+
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition',
+            `attachment; filename=gravy-withdrawals-${status}-${new Date().toISOString().split('T')[0]}.csv`);
+        return res.send(headers + csv);
+    } catch (err) {
+        console.error('[Admin] Withdrawal CSV export error:', err);
+        return res.status(500).json({ error: 'Export failed' });
+    }
+});
+
+/**
+ * POST /api/admin/withdrawals/batch-process
+ * Mark all approved withdrawals as processed in one transaction
+ * Optionally filter by date range
+ * Body: { dateFrom?, dateTo?, notes? }
+ */
+router.post('/withdrawals/batch-process', adminAuthMiddleware('admin'), async (req, res) => {
+    const { dateFrom, dateTo, notes } = req.body;
+    const client = await pool.connect();
+
+    try {
+        await client.query('BEGIN');
+
+        // Find all approved withdrawals matching the date range
+        let whereClause = `WHERE w.status = 'approved'`;
+        const params = [];
+        let paramIdx = 1;
+
+        if (dateFrom) {
+            whereClause += ` AND w.reviewed_at >= $${paramIdx}`;
+            params.push(dateFrom);
+            paramIdx++;
+        }
+        if (dateTo) {
+            whereClause += ` AND w.reviewed_at <= $${paramIdx}::date + INTERVAL '1 day'`;
+            params.push(dateTo);
+            paramIdx++;
+        }
+
+        const approvedResult = await client.query(
+            `SELECT w.* FROM withdrawal_requests w ${whereClause} ORDER BY w.reviewed_at ASC`,
+            params
+        );
+
+        if (approvedResult.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ error: 'No approved withdrawals found for the selected criteria' });
+        }
+
+        const batchNote = notes || `Batch processed on ${new Date().toISOString().split('T')[0]}`;
+        let totalAmount = 0;
+        let processedCount = 0;
+
+        for (const withdrawal of approvedResult.rows) {
+            // Deduct from wallet
+            await client.query(
+                `UPDATE users SET wallet_balance = wallet_balance - $1, updated_at = CURRENT_TIMESTAMP
+                 WHERE id = $2`,
+                [withdrawal.amount, withdrawal.user_id]
+            );
+
+            // Get updated balance
+            const balResult = await client.query(
+                'SELECT wallet_balance FROM users WHERE id = $1',
+                [withdrawal.user_id]
+            );
+
+            // Record transaction
+            await client.query(
+                `INSERT INTO wallet_transactions (user_id, type, amount, balance_after, description, reference_id)
+                 VALUES ($1, 'withdrawal', $2, $3, $4, $5)`,
+                [withdrawal.user_id, -withdrawal.amount, balResult.rows[0].wallet_balance,
+                 batchNote, withdrawal.id]
+            );
+
+            // Update withdrawal status
+            await client.query(
+                `UPDATE withdrawal_requests SET status = 'processed', processed_at = CURRENT_TIMESTAMP,
+                 admin_notes = COALESCE(admin_notes || ' | ', '') || $1
+                 WHERE id = $2`,
+                [batchNote, withdrawal.id]
+            );
+
+            totalAmount += parseFloat(withdrawal.amount);
+            processedCount++;
+        }
+
+        await client.query('COMMIT');
+
+        await logAuditEvent(req.admin.id, 'withdrawal.batch_process', 'withdrawal', null,
+            { processedCount, totalAmount, dateFrom, dateTo, notes: batchNote }, req);
+
+        return res.json({
+            success: true,
+            message: `Batch processed ${processedCount} withdrawal(s) totalling ₦${totalAmount.toLocaleString()}`,
+            processedCount,
+            totalAmount
+        });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('[Admin] Batch process error:', err);
+        return res.status(500).json({ error: 'Batch processing failed — no changes were made' });
+    } finally {
+        client.release();
+    }
+});
+
 // ============================================================
 // REFERRAL AUDIT
 // ============================================================

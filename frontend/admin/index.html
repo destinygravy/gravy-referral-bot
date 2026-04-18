@@ -953,10 +953,15 @@
 
                 <!-- Withdrawals Page -->
                 <div id="withdrawalsPage" class="page">
-                    <div class="table-container">
-                        <div class="table-header">
-                            <h3 class="chart-title" style="margin: 0;">Withdrawal Requests</h3>
-                            <div class="filter-group">
+                    <!-- Batch Actions Bar -->
+                    <div class="table-container" style="margin-bottom: 16px;">
+                        <div class="table-header" style="flex-wrap: wrap; gap: 12px;">
+                            <h3 class="chart-title" style="margin: 0; width: 100%;">Payment Batch Manager</h3>
+                            <div class="filter-group" style="flex-wrap: wrap; gap: 8px; width: 100%;">
+                                <label style="font-size: 13px; color: #888; white-space: nowrap; align-self: center;">From:</label>
+                                <input type="date" id="withdrawalDateFrom" style="background: #0f1324; border: 1px solid #2a3f5f; padding: 8px 10px; border-radius: 6px; color: #fff; font-size: 13px;">
+                                <label style="font-size: 13px; color: #888; white-space: nowrap; align-self: center;">To:</label>
+                                <input type="date" id="withdrawalDateTo" style="background: #0f1324; border: 1px solid #2a3f5f; padding: 8px 10px; border-radius: 6px; color: #fff; font-size: 13px;">
                                 <select id="withdrawalsFilter">
                                     <option value="all">All Status</option>
                                     <option value="pending">Pending</option>
@@ -964,7 +969,17 @@
                                     <option value="processed">Processed</option>
                                     <option value="rejected">Rejected</option>
                                 </select>
+                                <button class="btn btn-primary" id="downloadApprovedCSV">📥 Download Approved CSV</button>
+                                <button class="btn btn-success" id="batchProcessBtn">✅ Batch Process All Approved</button>
                             </div>
+                            <div id="batchSummary" style="width: 100%; font-size: 13px; color: #888; display: none;"></div>
+                        </div>
+                    </div>
+
+                    <div class="table-container">
+                        <div class="table-header">
+                            <h3 class="chart-title" style="margin: 0;">Withdrawal Requests</h3>
+                            <div id="withdrawalStats" style="font-size: 13px; color: #888;"></div>
                         </div>
                         <table id="withdrawalsTable">
                             <thead>
@@ -1897,6 +1912,84 @@
             state.withdrawals.status = e.target.value;
             state.withdrawals.page = 1;
             loadWithdrawals();
+        });
+
+        // Date filter changes
+        document.getElementById('withdrawalDateFrom').addEventListener('change', () => {
+            state.withdrawals.page = 1;
+            loadWithdrawals();
+        });
+        document.getElementById('withdrawalDateTo').addEventListener('change', () => {
+            state.withdrawals.page = 1;
+            loadWithdrawals();
+        });
+
+        // Download Approved CSV
+        document.getElementById('downloadApprovedCSV').addEventListener('click', () => {
+            const dateFrom = document.getElementById('withdrawalDateFrom').value;
+            const dateTo = document.getElementById('withdrawalDateTo').value;
+            const params = new URLSearchParams({ status: 'approved' });
+            if (dateFrom) params.append('dateFrom', dateFrom);
+            if (dateTo) params.append('dateTo', dateTo);
+
+            // Open CSV download in new tab (auth via token in URL won't work, so use fetch)
+            const url = API_BASE + `/withdrawals/export/csv?${params}`;
+            fetch(url, {
+                headers: { 'Authorization': `Bearer ${state.token}` }
+            })
+            .then(response => {
+                if (!response.ok) return response.json().then(d => { throw new Error(d.error || 'Export failed'); });
+                return response.blob();
+            })
+            .then(blob => {
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = `gravy-withdrawals-approved-${new Date().toISOString().split('T')[0]}.csv`;
+                a.click();
+                URL.revokeObjectURL(a.href);
+                showToast('CSV downloaded successfully');
+            })
+            .catch(err => {
+                showToast(err.message, 'error');
+            });
+        });
+
+        // Batch Process All Approved
+        document.getElementById('batchProcessBtn').addEventListener('click', async () => {
+            const dateFrom = document.getElementById('withdrawalDateFrom').value;
+            const dateTo = document.getElementById('withdrawalDateTo').value;
+
+            const confirmMsg = `Are you sure you want to mark ALL approved withdrawals as PROCESSED?\n\n` +
+                (dateFrom || dateTo ? `Date range: ${dateFrom || 'start'} to ${dateTo || 'now'}\n\n` : '') +
+                `This will:\n- Deduct funds from each user's wallet\n- Record withdrawal transactions\n- Mark all as paid\n\nThis action CANNOT be undone.`;
+
+            if (!confirm(confirmMsg)) return;
+
+            // Double confirmation for safety
+            const doubleConfirm = prompt('Type "PROCESS" to confirm batch processing:');
+            if (doubleConfirm !== 'PROCESS') {
+                showToast('Batch processing cancelled', 'warning');
+                return;
+            }
+
+            const btn = document.getElementById('batchProcessBtn');
+            btn.disabled = true;
+            btn.textContent = '⏳ Processing...';
+
+            const body = {};
+            if (dateFrom) body.dateFrom = dateFrom;
+            if (dateTo) body.dateTo = dateTo;
+            body.notes = `Batch payment processed by ${state.user.displayName || state.user.username}`;
+
+            const result = await apiCall('/withdrawals/batch-process', 'POST', body);
+
+            btn.disabled = false;
+            btn.textContent = '✅ Batch Process All Approved';
+
+            if (result && result.success) {
+                showToast(result.message);
+                loadWithdrawals();
+            }
         });
 
         // Referral Audit
