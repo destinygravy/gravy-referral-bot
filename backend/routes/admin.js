@@ -828,6 +828,186 @@ router.post('/withdrawals/batch-process', adminAuthMiddleware('admin'), async (r
 // ============================================================
 
 /**
+ * GET /api/admin/referrals/audit/user
+ * Search a specific user's full referral tree by name, username, or referral code.
+ * Shows all referrals in their tree with onboarding status and earnings info.
+ * Also checks for duplicate earning claims.
+ */
+router.get('/referrals/audit/user', adminAuthMiddleware(), async (req, res) => {
+    const search = (req.query.search || '').trim();
+    if (!search) {
+        return res.status(400).json({ error: 'Search query required (name, username, or referral code)' });
+    }
+
+    try {
+        // Find the user by name, username, referral code, or telegram ID
+        const userResult = await pool.query(
+            `SELECT id, first_name, last_name, telegram_username, referral_code,
+                    gravy_account_number, is_onboarded, total_earned, wallet_balance,
+                    referred_by, created_at
+             FROM users
+             WHERE referral_code ILIKE $1
+                OR telegram_username ILIKE $1
+                OR first_name ILIKE $1
+                OR CONCAT(first_name, ' ', last_name) ILIKE $1
+                OR CAST(telegram_id AS TEXT) = $2
+             LIMIT 10`,
+            [`%${search}%`, search]
+        );
+
+        if (userResult.rows.length === 0) {
+            return res.json({ success: true, users: [], message: 'No users found' });
+        }
+
+        // For each matched user, get their full referral tree
+        const results = [];
+
+        for (const user of userResult.rows) {
+            // Get who referred this user (upline)
+            let referrer = null;
+            if (user.referred_by) {
+                const refResult = await pool.query(
+                    `SELECT id, first_name, last_name, telegram_username, referral_code,
+                            is_onboarded, gravy_account_number, created_at
+                     FROM users WHERE id = $1`,
+                    [user.referred_by]
+                );
+                if (refResult.rows.length > 0) referrer = refResult.rows[0];
+            }
+
+            // Get all descendants (people this user referred, up to 3 levels)
+            const descendantsResult = await pool.query(
+                `SELECT rt.level, u.id, u.first_name, u.last_name, u.telegram_username,
+                        u.referral_code, u.is_onboarded, u.gravy_account_number,
+                        u.created_at, u.total_earned,
+                        ref.first_name as referred_by_name, ref.referral_code as referred_by_code
+                 FROM referral_tree rt
+                 JOIN users u ON u.id = rt.descendant_id
+                 LEFT JOIN users ref ON ref.id = u.referred_by
+                 WHERE rt.ancestor_id = $1
+                 ORDER BY rt.level ASC, u.created_at DESC`,
+                [user.id]
+            );
+
+            // Get earnings this user received from referrals
+            const earningsResult = await pool.query(
+                `SELECT re.level, re.amount, re.status, re.created_at,
+                        u.first_name as source_name, u.telegram_username as source_username,
+                        u.is_onboarded as source_onboarded, u.referral_code as source_code
+                 FROM referral_earnings re
+                 JOIN users u ON u.id = re.source_user_id
+                 WHERE re.earner_id = $1
+                 ORDER BY re.created_at DESC`,
+                [user.id]
+            );
+
+            // Check for potential duplicate claims:
+            // Users in the tree who are onboarded but have no corresponding earning record
+            const onboardedDescendants = descendantsResult.rows.filter(d => d.is_onboarded && d.level === 1);
+            const earnedFromIds = new Set(earningsResult.rows.map(e => e.source_code));
+            const missingEarnings = onboardedDescendants.filter(d => !earnedFromIds.has(d.referral_code));
+
+            // Check for users who may have been paid twice
+            const duplicateCheck = await pool.query(
+                `SELECT source_user_id, COUNT(*) as count
+                 FROM referral_earnings
+                 WHERE earner_id = $1
+                 GROUP BY source_user_id
+                 HAVING COUNT(*) > 1`,
+                [user.id]
+            );
+
+            results.push({
+                user: {
+                    id: user.id,
+                    firstName: user.first_name,
+                    lastName: user.last_name,
+                    username: user.telegram_username,
+                    referralCode: user.referral_code,
+                    gravyAccount: user.gravy_account_number,
+                    isOnboarded: user.is_onboarded,
+                    totalEarned: parseFloat(user.total_earned),
+                    walletBalance: parseFloat(user.wallet_balance),
+                    createdAt: user.created_at
+                },
+                referrer: referrer ? {
+                    id: referrer.id,
+                    firstName: referrer.first_name,
+                    lastName: referrer.last_name,
+                    username: referrer.telegram_username,
+                    referralCode: referrer.referral_code,
+                    isOnboarded: referrer.is_onboarded,
+                    gravyAccount: referrer.gravy_account_number,
+                    createdAt: referrer.created_at
+                } : null,
+                descendants: {
+                    level1: descendantsResult.rows.filter(d => d.level === 1).map(d => ({
+                        id: d.id,
+                        firstName: d.first_name,
+                        lastName: d.last_name,
+                        username: d.telegram_username,
+                        referralCode: d.referral_code,
+                        isOnboarded: d.is_onboarded,
+                        gravyAccount: d.gravy_account_number,
+                        createdAt: d.created_at,
+                        totalEarned: parseFloat(d.total_earned)
+                    })),
+                    level2: descendantsResult.rows.filter(d => d.level === 2).map(d => ({
+                        id: d.id,
+                        firstName: d.first_name,
+                        lastName: d.last_name,
+                        username: d.telegram_username,
+                        referralCode: d.referral_code,
+                        isOnboarded: d.is_onboarded,
+                        gravyAccount: d.gravy_account_number,
+                        createdAt: d.created_at,
+                        referredByName: d.referred_by_name,
+                        referredByCode: d.referred_by_code
+                    })),
+                    level3: descendantsResult.rows.filter(d => d.level === 3).map(d => ({
+                        id: d.id,
+                        firstName: d.first_name,
+                        lastName: d.last_name,
+                        username: d.telegram_username,
+                        referralCode: d.referral_code,
+                        isOnboarded: d.is_onboarded,
+                        gravyAccount: d.gravy_account_number,
+                        createdAt: d.created_at,
+                        referredByName: d.referred_by_name,
+                        referredByCode: d.referred_by_code
+                    }))
+                },
+                earnings: earningsResult.rows.map(e => ({
+                    level: e.level,
+                    amount: parseFloat(e.amount),
+                    status: e.status,
+                    sourceName: e.source_name,
+                    sourceUsername: e.source_username,
+                    sourceOnboarded: e.source_onboarded,
+                    sourceCode: e.source_code,
+                    createdAt: e.created_at
+                })),
+                flags: {
+                    missingEarnings: missingEarnings.length,
+                    duplicateClaims: duplicateCheck.rows.length,
+                    missingEarningDetails: missingEarnings.map(m => ({
+                        firstName: m.first_name,
+                        referralCode: m.referral_code,
+                        isOnboarded: m.is_onboarded
+                    })),
+                    duplicateClaimDetails: duplicateCheck.rows
+                }
+            });
+        }
+
+        return res.json({ success: true, results });
+    } catch (err) {
+        console.error('[Admin] Referral audit user search error:', err);
+        return res.status(500).json({ error: 'Failed to audit referral tree' });
+    }
+});
+
+/**
  * GET /api/admin/referrals/audit
  * View referral chains with fraud detection
  */

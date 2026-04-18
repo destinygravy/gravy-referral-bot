@@ -1000,6 +1000,68 @@
 
                 <!-- Referral Audit Page -->
                 <div id="referralAuditPage" class="page">
+                    <!-- User Search Section -->
+                    <div class="table-container" style="margin-bottom: 24px;">
+                        <div class="table-header">
+                            <h3 class="chart-title" style="margin: 0;">🔍 Audit User Referral Tree</h3>
+                        </div>
+                        <div style="padding: 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+                            <input type="text" id="auditSearchInput" placeholder="Enter name, username, referral code, or Telegram ID"
+                                style="flex: 1; min-width: 250px; padding: 10px 14px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px;">
+                            <button class="btn btn-primary" id="auditSearchBtn">Search</button>
+                        </div>
+                        <div id="auditSearchResults" style="padding: 0 16px 16px;"></div>
+                    </div>
+
+                    <!-- Audit Detail Panel (shown after search) -->
+                    <div id="auditDetailPanel" style="display: none;">
+                        <!-- User Summary Card -->
+                        <div class="table-container" style="margin-bottom: 24px;">
+                            <div class="table-header">
+                                <h3 class="chart-title" style="margin: 0;">👤 User Summary</h3>
+                            </div>
+                            <div id="auditUserSummary" style="padding: 16px;"></div>
+                        </div>
+
+                        <!-- Flags / Warnings -->
+                        <div id="auditFlagsContainer" class="table-container" style="margin-bottom: 24px; display: none;">
+                            <div class="table-header">
+                                <h3 class="chart-title" style="margin: 0;">⚠️ Audit Flags</h3>
+                            </div>
+                            <div id="auditFlags" style="padding: 16px;"></div>
+                        </div>
+
+                        <!-- Referral Tree -->
+                        <div class="table-container" style="margin-bottom: 24px;">
+                            <div class="table-header">
+                                <h3 class="chart-title" style="margin: 0;">🌳 Referral Tree</h3>
+                            </div>
+                            <div id="auditReferralTree" style="padding: 16px;"></div>
+                        </div>
+
+                        <!-- Earnings Ledger -->
+                        <div class="table-container" style="margin-bottom: 24px;">
+                            <div class="table-header">
+                                <h3 class="chart-title" style="margin: 0;">💰 Earnings from Referrals</h3>
+                            </div>
+                            <table id="auditEarningsTable">
+                                <thead>
+                                    <tr>
+                                        <th>Level</th>
+                                        <th>From User</th>
+                                        <th>Code</th>
+                                        <th>Onboarded</th>
+                                        <th>Amount (₦)</th>
+                                        <th>Status</th>
+                                        <th>Date</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Overview Tables (always visible) -->
                     <div class="table-container">
                         <div class="table-header">
                             <h3 class="chart-title" style="margin: 0;">Top Referrers vs Paid</h3>
@@ -1994,22 +2056,32 @@
 
         // Referral Audit
         async function loadReferralAudit() {
+            // Set up search handlers
+            const searchBtn = document.getElementById('auditSearchBtn');
+            const searchInput = document.getElementById('auditSearchInput');
+            if (searchBtn && !searchBtn._auditBound) {
+                searchBtn._auditBound = true;
+                searchBtn.addEventListener('click', () => performAuditSearch());
+                searchInput.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') performAuditSearch();
+                });
+            }
+
+            // Load overview data
             const data = await apiCall('/referrals/audit');
             if (!data) return;
 
-            // API returns { success, referrers: [...], recentEarnings: [...] }
-            const referrers = data.referrers || (data.data && data.data.topReferrers) || [];
+            const referrers = data.referrers || [];
             const tbody = document.querySelector('#referralAuditTable tbody');
             tbody.innerHTML = referrers.map((user, index) => {
-                const paidCount = parseInt(user.paid_referrals || user.paidReferrals || 0);
-                const totalCount = parseInt(user.referral_count || user.totalReferrals || 0);
+                const paidCount = parseInt(user.paid_referrals || 0);
+                const totalCount = parseInt(user.referral_count || 0);
                 const conversion = totalCount > 0 ? ((paidCount / totalCount) * 100).toFixed(1) : 0;
-
                 return `
                     <tr>
                         <td>${index + 1}</td>
-                        <td>${user.first_name || user.displayName || user.fullName || 'N/A'}</td>
-                        <td>@${user.telegram_username || user.username || 'N/A'}</td>
+                        <td>${user.first_name || 'N/A'}</td>
+                        <td>@${user.telegram_username || 'N/A'}</td>
                         <td>${totalCount}</td>
                         <td>${paidCount}</td>
                         <td>${totalCount - paidCount}</td>
@@ -2017,24 +2089,182 @@
                     </tr>
                 `;
             }).join('');
-
             if (referrers.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#888;">No referral data yet</td></tr>';
             }
 
-            const recentEarnings = data.recentEarnings || (data.data && data.data.recentEarnings) || [];
+            const recentEarnings = data.recentEarnings || [];
             const earningsBody = document.querySelector('#recentEarningsTable tbody');
             earningsBody.innerHTML = recentEarnings.map(earning => `
                 <tr>
-                    <td>${earning.earner_name || (earning.fromUser && earning.fromUser.displayName) || 'N/A'}</td>
-                    <td>${earning.source_name || (earning.earnedFromUser && earning.earnedFromUser.displayName) || 'N/A'}</td>
+                    <td>${earning.earner_name || 'N/A'}</td>
+                    <td>${earning.source_name || 'N/A'}</td>
                     <td>${formatCurrency(earning.amount)}</td>
-                    <td>${formatDate(earning.created_at || earning.date)}</td>
+                    <td>${formatDate(earning.created_at)}</td>
                 </tr>
             `).join('');
-
             if (recentEarnings.length === 0) {
                 earningsBody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#888;">No earnings yet</td></tr>';
+            }
+        }
+
+        // Audit search - find a user's full referral tree
+        async function performAuditSearch() {
+            const search = document.getElementById('auditSearchInput').value.trim();
+            if (!search) return alert('Enter a name, username, referral code, or Telegram ID');
+
+            const resultsDiv = document.getElementById('auditSearchResults');
+            resultsDiv.innerHTML = '<p style="color:#888;">Searching...</p>';
+            document.getElementById('auditDetailPanel').style.display = 'none';
+
+            const data = await apiCall('/referrals/audit/user?search=' + encodeURIComponent(search));
+            if (!data) { resultsDiv.innerHTML = '<p style="color:red;">Search failed</p>'; return; }
+
+            const results = data.results || [];
+            if (results.length === 0) {
+                resultsDiv.innerHTML = '<p style="color:#888;">No users found matching "' + search + '"</p>';
+                return;
+            }
+
+            if (results.length === 1) {
+                resultsDiv.innerHTML = '';
+                displayAuditResult(results[0]);
+            } else {
+                // Multiple matches — show selection list
+                resultsDiv.innerHTML = '<p style="margin-bottom:8px;font-weight:600;">Multiple matches found — select one:</p>';
+                results.forEach((r, i) => {
+                    const btn = document.createElement('button');
+                    btn.className = 'btn';
+                    btn.style.cssText = 'margin: 4px 8px 4px 0; background: #f0f0f0; color: #333;';
+                    btn.textContent = (r.user.firstName || '') + ' ' + (r.user.lastName || '') + ' (@' + (r.user.username || 'N/A') + ') — ' + r.user.referralCode;
+                    btn.addEventListener('click', () => {
+                        resultsDiv.innerHTML = '';
+                        displayAuditResult(r);
+                    });
+                    resultsDiv.appendChild(btn);
+                });
+            }
+        }
+
+        function displayAuditResult(result) {
+            const panel = document.getElementById('auditDetailPanel');
+            panel.style.display = 'block';
+
+            const u = result.user;
+            const ref = result.referrer;
+            const desc = result.descendants;
+            const flags = result.flags;
+
+            // User summary
+            document.getElementById('auditUserSummary').innerHTML = `
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;">
+                    <div><strong>Name:</strong> ${u.firstName || ''} ${u.lastName || ''}</div>
+                    <div><strong>Username:</strong> @${u.username || 'N/A'}</div>
+                    <div><strong>Referral Code:</strong> <span style="font-family:monospace;background:#f0f0f0;padding:2px 6px;border-radius:4px;">${u.referralCode}</span></div>
+                    <div><strong>Gravy Account:</strong> ${u.gravyAccount || 'Not set'}</div>
+                    <div><strong>Onboarded:</strong> <span class="badge ${u.isOnboarded ? 'badge-success' : 'badge-danger'}">${u.isOnboarded ? 'Yes' : 'No'}</span></div>
+                    <div><strong>Total Earned:</strong> ₦${formatCurrency(u.totalEarned)}</div>
+                    <div><strong>Wallet Balance:</strong> ₦${formatCurrency(u.walletBalance)}</div>
+                    <div><strong>Joined:</strong> ${formatDate(u.createdAt)}</div>
+                    <div><strong>Referred By:</strong> ${ref ? (ref.firstName || '') + ' ' + (ref.lastName || '') + ' (@' + (ref.username || 'N/A') + ') — ' + ref.referralCode : '<em>No referrer (organic)</em>'}</div>
+                </div>
+            `;
+
+            // Flags
+            const flagsContainer = document.getElementById('auditFlagsContainer');
+            const flagsDiv = document.getElementById('auditFlags');
+            if (flags.missingEarnings > 0 || flags.duplicateClaims > 0) {
+                flagsContainer.style.display = 'block';
+                let flagHtml = '';
+                if (flags.duplicateClaims > 0) {
+                    flagHtml += '<div style="background:#fee;border:1px solid #f88;padding:12px;border-radius:8px;margin-bottom:8px;">🚨 <strong>Duplicate Claims Detected:</strong> ' + flags.duplicateClaims + ' user(s) have been paid more than once for the same referral.</div>';
+                }
+                if (flags.missingEarnings > 0) {
+                    flagHtml += '<div style="background:#fff3e0;border:1px solid #ffa726;padding:12px;border-radius:8px;">⚠️ <strong>Missing Earnings:</strong> ' + flags.missingEarnings + ' onboarded direct referral(s) have no corresponding earning record. ';
+                    flagHtml += 'Users: ' + flags.missingEarningDetails.map(m => m.firstName + ' (' + m.referralCode + ')').join(', ');
+                    flagHtml += '</div>';
+                }
+                flagsDiv.innerHTML = flagHtml;
+            } else {
+                flagsContainer.style.display = 'block';
+                flagsDiv.innerHTML = '<div style="background:#e8f5e9;border:1px solid #66bb6a;padding:12px;border-radius:8px;">✅ <strong>No issues found.</strong> All earnings are properly distributed with no duplicate claims.</div>';
+            }
+
+            // Referral tree visualization
+            const treeDiv = document.getElementById('auditReferralTree');
+            let treeHtml = '';
+
+            function renderPerson(p, indent, label) {
+                const onboardBadge = p.isOnboarded
+                    ? '<span class="badge badge-success" style="font-size:11px;">Onboarded</span>'
+                    : '<span class="badge badge-danger" style="font-size:11px;">Not Onboarded</span>';
+                const gravyInfo = p.gravyAccount ? ' | Acct: ' + p.gravyAccount : '';
+                return '<div style="margin-left:' + (indent * 24) + 'px;padding:8px 12px;margin-bottom:4px;background:#f8f9fa;border-radius:6px;border-left:3px solid ' + (p.isOnboarded ? '#66bb6a' : '#ef5350') + ';">'
+                    + '<strong>' + label + '</strong> '
+                    + (p.firstName || '') + ' ' + (p.lastName || '') + ' (@' + (p.username || 'N/A') + ') '
+                    + onboardBadge
+                    + '<br><span style="font-size:12px;color:#888;">Code: ' + p.referralCode + gravyInfo + ' | Joined: ' + formatDate(p.createdAt) + '</span>'
+                    + '</div>';
+            }
+
+            // Upline
+            if (ref) {
+                treeHtml += '<div style="margin-bottom:12px;"><strong style="color:#555;">↑ UPLINE (Referred by):</strong></div>';
+                treeHtml += renderPerson(ref, 0, '🔗');
+            }
+
+            // The searched user
+            treeHtml += '<div style="margin:12px 0;"><strong style="color:#555;">★ SEARCHED USER:</strong></div>';
+            treeHtml += '<div style="padding:10px 14px;background:#e3f2fd;border-radius:8px;border-left:4px solid #1976d2;margin-bottom:12px;">'
+                + '<strong>' + (u.firstName || '') + ' ' + (u.lastName || '') + '</strong> (@' + (u.username || 'N/A') + ') | ' + u.referralCode
+                + ' | Earned: ₦' + formatCurrency(u.totalEarned)
+                + '</div>';
+
+            // Level 1
+            if (desc.level1.length > 0) {
+                treeHtml += '<div style="margin:12px 0;"><strong style="color:#555;">↓ LEVEL 1 — Direct Referrals (' + desc.level1.length + '):</strong></div>';
+                desc.level1.forEach(p => { treeHtml += renderPerson(p, 1, '├─'); });
+            } else {
+                treeHtml += '<div style="margin:12px 0;color:#888;"><em>No direct referrals yet.</em></div>';
+            }
+
+            // Level 2
+            if (desc.level2.length > 0) {
+                treeHtml += '<div style="margin:12px 0;"><strong style="color:#555;">↓ LEVEL 2 — Indirect Referrals (' + desc.level2.length + '):</strong></div>';
+                desc.level2.forEach(p => {
+                    const label = '├── via ' + (p.referredByName || p.referredByCode || '?');
+                    treeHtml += renderPerson(p, 2, label);
+                });
+            }
+
+            // Level 3
+            if (desc.level3.length > 0) {
+                treeHtml += '<div style="margin:12px 0;"><strong style="color:#555;">↓ LEVEL 3 — Deep Referrals (' + desc.level3.length + '):</strong></div>';
+                desc.level3.forEach(p => {
+                    const label = '├─── via ' + (p.referredByName || p.referredByCode || '?');
+                    treeHtml += renderPerson(p, 3, label);
+                });
+            }
+
+            treeDiv.innerHTML = treeHtml;
+
+            // Earnings table
+            const earningsTbody = document.querySelector('#auditEarningsTable tbody');
+            const earnings = result.earnings || [];
+            if (earnings.length > 0) {
+                earningsTbody.innerHTML = earnings.map(e => `
+                    <tr>
+                        <td>Level ${e.level}</td>
+                        <td>${e.sourceName || 'N/A'} (@${e.sourceUsername || 'N/A'})</td>
+                        <td><span style="font-family:monospace;">${e.sourceCode || 'N/A'}</span></td>
+                        <td><span class="badge ${e.sourceOnboarded ? 'badge-success' : 'badge-danger'}">${e.sourceOnboarded ? 'Yes' : 'No'}</span></td>
+                        <td>₦${formatCurrency(e.amount)}</td>
+                        <td><span class="badge ${e.status === 'credited' ? 'badge-success' : 'badge-warning'}">${e.status}</span></td>
+                        <td>${formatDate(e.createdAt)}</td>
+                    </tr>
+                `).join('');
+            } else {
+                earningsTbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#888;">No earnings recorded for this user</td></tr>';
             }
         }
 
