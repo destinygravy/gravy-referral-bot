@@ -1115,7 +1115,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <span>User Details</span>
-                <button class="modal-close" onclick="closeModal('userDetailsModal')">&times;</button>
+                <button class="modal-close" data-close-modal="userDetailsModal">&times;</button>
             </div>
             <div id="userDetailsBody"></div>
         </div>
@@ -1126,7 +1126,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <span>Add Admin</span>
-                <button class="modal-close" onclick="closeModal('adminFormModal')">&times;</button>
+                <button class="modal-close" data-close-modal="adminFormModal">&times;</button>
             </div>
             <form id="adminForm">
                 <div class="form-group">
@@ -1162,7 +1162,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <span id="withdrawalModalTitle">Approve Withdrawal</span>
-                <button class="modal-close" onclick="closeModal('withdrawalModal')">&times;</button>
+                <button class="modal-close" data-close-modal="withdrawalModal">&times;</button>
             </div>
             <form id="withdrawalForm">
                 <div class="form-group">
@@ -1171,7 +1171,7 @@
                 </div>
                 <div style="display: flex; gap: 10px;">
                     <button type="submit" class="btn btn-success" style="flex: 1;">Confirm</button>
-                    <button type="button" class="btn btn-secondary" style="flex: 1;" onclick="closeModal('withdrawalModal')">Cancel</button>
+                    <button type="button" class="btn btn-secondary" style="flex: 1;" data-close-modal="withdrawalModal">Cancel</button>
                 </div>
             </form>
         </div>
@@ -1532,7 +1532,7 @@
             const users = data.users || (data.data && data.data.users) || [];
             const tbody = document.querySelector('#usersTable tbody');
             tbody.innerHTML = users.map(user => `
-                <tr class="expandable" onclick="showUserDetails('${user.id || user._id}')">
+                <tr class="expandable" data-user-id="${user.id || user._id}">
                     <td>${user.firstName || user.displayName || user.fullName || 'N/A'} ${user.lastName || ''}</td>
                     <td>${user.username || 'N/A'}</td>
                     <td>${user.referralCode}</td>
@@ -1548,6 +1548,13 @@
             if (users.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#888;">No users found</td></tr>';
             }
+
+            // Attach click handlers for user rows (CSP-safe)
+            tbody.querySelectorAll('[data-user-id]').forEach(row => {
+                row.addEventListener('click', () => {
+                    showUserDetails(row.getAttribute('data-user-id'));
+                });
+            });
 
             // Pagination
             const pagination = data.pagination || data.data || {};
@@ -1575,8 +1582,8 @@
                         <div style="color: #888; font-size: 13px;">@${user.telegram_username || 'N/A'} | Code: ${user.referral_code}</div>
                     </div>
                     <div style="display: flex; gap: 10px;">
-                        ${!user.referred_by ? `<button class="btn btn-primary" onclick="showLinkReferralForm('${userId}', '${(user.first_name || '') + ' ' + (user.last_name || '')}')">🔗 Link Referrer</button>` : ''}
-                        ${user.is_banned ? `<button class="btn btn-success" onclick="unbanUser('${userId}')">Unban</button>` : `<button class="btn btn-danger" onclick="banUser('${userId}')">Ban</button>`}
+                        ${!user.referred_by ? `<button class="btn btn-primary" data-detail-action="linkReferral" data-uid="${userId}" data-uname="${(user.first_name || '') + ' ' + (user.last_name || '')}">🔗 Link Referrer</button>` : ''}
+                        ${user.is_banned ? `<button class="btn btn-success" data-detail-action="unban" data-uid="${userId}">Unban</button>` : `<button class="btn btn-danger" data-detail-action="ban" data-uid="${userId}">Ban</button>`}
                     </div>
                 </div>
 
@@ -1695,6 +1702,18 @@
             `;
 
             document.getElementById('userDetailsBody').innerHTML = html;
+
+            // Attach handlers for user detail action buttons (CSP-safe)
+            document.querySelectorAll('[data-detail-action]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const action = btn.getAttribute('data-detail-action');
+                    const uid = btn.getAttribute('data-uid');
+                    if (action === 'linkReferral') showLinkReferralForm(uid, btn.getAttribute('data-uname'));
+                    else if (action === 'ban') banUser(uid);
+                    else if (action === 'unban') unbanUser(uid);
+                });
+            });
+
             openModal('userDetailsModal');
         }
 
@@ -1795,16 +1814,28 @@
                     <td><span class="badge badge-${getStatusBadgeClass(w.status)}">${w.status}</span></td>
                     <td>
                         ${w.status === 'pending' ? `
-                            <button class="btn btn-success" onclick="approveWithdrawal('${w.id || w._id}')">Approve</button>
-                            <button class="btn btn-danger" onclick="rejectWithdrawal('${w.id || w._id}')">Reject</button>
+                            <button class="btn btn-success" data-action="approve" data-id="${w.id || w._id}">Approve</button>
+                            <button class="btn btn-danger" data-action="reject" data-id="${w.id || w._id}">Reject</button>
                         ` : ''}
                         ${w.status === 'approved' ? `
-                            <button class="btn btn-primary" onclick="processWithdrawal('${w.id || w._id}')">Process</button>
+                            <button class="btn btn-primary" data-action="process" data-id="${w.id || w._id}">Process</button>
                         ` : ''}
                     </td>
                     <td>${formatDate(w.createdAt)}</td>
                 </tr>
             `).join('');
+
+            // Attach click handlers via addEventListener (CSP blocks inline onclick)
+            tbody.querySelectorAll('[data-action]').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const action = btn.getAttribute('data-action');
+                    const id = btn.getAttribute('data-id');
+                    if (action === 'approve') approveWithdrawal(id);
+                    else if (action === 'reject') rejectWithdrawal(id);
+                    else if (action === 'process') processWithdrawal(id);
+                });
+            });
 
             if (withdrawals.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#888;">No withdrawal requests</td></tr>';
@@ -1932,13 +1963,23 @@
                     <td>${(admin.last_login_at || admin.lastLogin) ? formatDate(admin.last_login_at || admin.lastLogin) : 'Never'}</td>
                     <td>
                         ${(admin.is_active !== false && admin.active !== false) ? `
-                            <button class="btn btn-danger" onclick="deactivateAdmin('${admin.id || admin._id}')">Deactivate</button>
+                            <button class="btn btn-danger" data-admin-action="deactivate" data-admin-id="${admin.id || admin._id}">Deactivate</button>
                         ` : `
-                            <button class="btn btn-success" onclick="activateAdmin('${admin.id || admin._id}')">Activate</button>
+                            <button class="btn btn-success" data-admin-action="activate" data-admin-id="${admin.id || admin._id}">Activate</button>
                         `}
                     </td>
                 </tr>
             `).join('');
+
+            // Attach admin action handlers (CSP-safe)
+            document.querySelectorAll('[data-admin-action]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const action = btn.getAttribute('data-admin-action');
+                    const id = btn.getAttribute('data-admin-id');
+                    if (action === 'deactivate') deactivateAdmin(id);
+                    else if (action === 'activate') activateAdmin(id);
+                });
+            });
         }
 
         document.getElementById('addAdminBtn').addEventListener('click', () => {
@@ -2080,28 +2121,36 @@
             }
         }
 
-        // Pagination helper
+        // Pagination helper (CSP-safe: uses addEventListener instead of inline onclick)
         function renderPagination(elementId, currentPage, totalPages, onPageChange) {
             const container = document.getElementById(elementId);
-            let html = '';
+            container.innerHTML = '';
+
+            function addPageLink(label, page) {
+                const a = document.createElement('a');
+                a.textContent = label;
+                a.addEventListener('click', () => onPageChange(page));
+                container.appendChild(a);
+            }
 
             if (currentPage > 1) {
-                html += `<a onclick="(() => { ${onPageChange.toString().replace('(page)', `(${currentPage - 1})`)} })()">&laquo; Previous</a>`;
+                addPageLink('\u00AB Previous', currentPage - 1);
             }
 
             for (let i = Math.max(1, currentPage - 2); i <= Math.min(totalPages, currentPage + 2); i++) {
                 if (i === currentPage) {
-                    html += `<span class="active">${i}</span>`;
+                    const span = document.createElement('span');
+                    span.className = 'active';
+                    span.textContent = i;
+                    container.appendChild(span);
                 } else {
-                    html += `<a onclick="(() => { ${onPageChange.toString().replace('(page)', `(${i})`)} })()">${i}</a>`;
+                    addPageLink(i, i);
                 }
             }
 
             if (currentPage < totalPages) {
-                html += `<a onclick="(() => { ${onPageChange.toString().replace('(page)', `(${currentPage + 1})`)} })()">Next &raquo;</a>`;
+                addPageLink('Next \u00BB', currentPage + 1);
             }
-
-            container.innerHTML = html;
         }
 
         // Setup/Login navigation
@@ -2144,6 +2193,13 @@
                 if (e.target === modal) {
                     modal.classList.remove('active');
                 }
+            });
+        });
+
+        // CSP-safe: attach close handlers for modal close buttons
+        document.querySelectorAll('[data-close-modal]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                closeModal(btn.getAttribute('data-close-modal'));
             });
         });
     </script>
