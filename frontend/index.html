@@ -1045,6 +1045,33 @@
         </div>
     </div>
 
+    <!-- Claim Referral Card (shown only if user is onboarded) -->
+    <div id="claimReferralCard" style="display:none; margin: 0 16px 16px;">
+        <div style="background: linear-gradient(135deg, #fff8e1 0%, #fff3e0 100%); border-radius: 16px; padding: 20px; border: 1px solid #ffe0b2;">
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
+                <div style="font-size: 24px;">🎯</div>
+                <div>
+                    <div style="font-weight: 700; font-size: 15px; color: #e65100;">Claim a Referral</div>
+                    <div style="font-size: 12px; color: #bf360c;">For friends who downloaded Gravy but won't use the mini app</div>
+                </div>
+            </div>
+            <p style="font-size: 13px; color: #555; margin-bottom: 14px; line-height: 1.5;">
+                Did you refer someone who has already signed up on Gravy but isn't interested in opening this app?
+                Enter their Gravy virtual account number below to verify and claim your reward.
+            </p>
+            <div class="input-group" style="margin-bottom: 12px;">
+                <label style="font-size: 13px; font-weight: 600; color: #333;">Their Gravy Account Number</label>
+                <input type="text" id="claimAccountInput" placeholder="Enter their virtual account number"
+                    style="padding: 12px; border: 1px solid #ddd; border-radius: 10px; font-size: 14px; width: 100%; box-sizing: border-box;">
+            </div>
+            <button class="btn btn-primary" id="claimReferralBtn"
+                style="width: 100%; background: linear-gradient(135deg, #ff8f00, #f57c00); border: none; padding: 14px; border-radius: 12px; font-weight: 700; font-size: 14px;">
+                🔍 Verify & Claim Reward
+            </button>
+            <div id="claimResultMessage" style="display:none; margin-top: 12px; padding: 12px; border-radius: 10px; font-size: 13px; text-align: center;"></div>
+        </div>
+    </div>
+
     <!-- Not verified message -->
     <div id="referNotVerified" style="display:none; margin: 16px;">
         <div class="onboarding-card">
@@ -1406,12 +1433,14 @@
             onboardingCard.style.display = 'none';
             document.getElementById('referralLinkSection').style.display = 'block';
             document.getElementById('referNotVerified').style.display = 'none';
+            document.getElementById('claimReferralCard').style.display = 'block';
         } else {
             statusEl.className = 'header-status status-pending';
             statusEl.textContent = '⏳ Unverified';
             onboardingCard.style.display = 'block';
             document.getElementById('referralLinkSection').style.display = 'none';
             document.getElementById('referNotVerified').style.display = 'block';
+            document.getElementById('claimReferralCard').style.display = 'none';
         }
     }
 
@@ -1810,6 +1839,74 @@
     }
 
     // ============================================================
+    // CLAIM REFERRAL (verify a friend's account on their behalf)
+    // ============================================================
+    async function claimReferral() {
+        const accountNumber = document.getElementById('claimAccountInput').value.trim();
+        const btn = document.getElementById('claimReferralBtn');
+        const resultMsg = document.getElementById('claimResultMessage');
+
+        if (!accountNumber) {
+            showToast('Please enter your friend\'s Gravy account number', 'error');
+            return;
+        }
+
+        if (!confirm('You are about to verify account ' + accountNumber + ' as your referral. Continue?')) {
+            return;
+        }
+
+        btn.disabled = true;
+        btn.textContent = '⏳ Verifying...';
+        resultMsg.style.display = 'none';
+
+        try {
+            const data = await apiCall('/auth/claim-referral', 'POST', {
+                gravyAccountNumber: accountNumber
+            });
+
+            if (data.success) {
+                // Update the referrer's UI with new balance
+                if (data.user) {
+                    currentUser = data.user;
+                    updateUI();
+                }
+
+                // Show success message
+                resultMsg.style.display = 'block';
+                resultMsg.style.background = '#e8f5e9';
+                resultMsg.style.color = '#2e7d32';
+                resultMsg.style.border = '1px solid #66bb6a';
+                resultMsg.innerHTML = '🎉 <strong>' + (data.userName || 'User') + '</strong> verified! You earned <strong>₦' + formatMoney(data.totalEarned || 0) + '</strong> from this referral.';
+
+                // Clear the input
+                document.getElementById('claimAccountInput').value = '';
+
+                // Refresh data
+                loadAllData();
+
+                if (tg?.HapticFeedback) {
+                    tg.HapticFeedback.notificationOccurred('success');
+                }
+
+                showToast('Referral claimed successfully!', 'success');
+            }
+        } catch (error) {
+            resultMsg.style.display = 'block';
+            resultMsg.style.background = '#ffebee';
+            resultMsg.style.color = '#c62828';
+            resultMsg.style.border = '1px solid #ef5350';
+            resultMsg.textContent = error.message || 'Verification failed. Please try again.';
+
+            if (tg?.HapticFeedback) {
+                tg.HapticFeedback.notificationOccurred('error');
+            }
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '🔍 Verify & Claim Reward';
+        }
+    }
+
+    // ============================================================
     // SHARE FUNCTIONS
     // ============================================================
     function copyReferralLink() {
@@ -1907,6 +2004,11 @@
     // --- Verify Account Button ---
     attachTelegramTap(document.getElementById('verifyBtn'), () => {
         verifyOnboarding();
+    });
+
+    // --- Claim Referral Button ---
+    attachTelegramTap(document.getElementById('claimReferralBtn'), () => {
+        claimReferral();
     });
 
     // --- Copy Referral Link ---

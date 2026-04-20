@@ -358,6 +358,215 @@ router.post('/verify-onboarding', telegramAuthMiddleware, async (req, res) => {
 });
 
 /**
+ * POST /api/auth/claim-referral
+ * Allows a referrer to verify and claim earnings for a referred user
+ * who downloaded Gravy but doesn't want to use the mini app.
+ *
+ * The referrer enters the referred person's Gravy account number.
+ * System verifies via Paystack, creates/updates the referred user record,
+ * and distributes earnings automatically.
+ *
+ * Body: { gravyAccountNumber: string }
+ */
+router.post('/claim-referral', telegramAuthMiddleware, async (req, res) => {
+    const { id: telegramId } = req.telegramUser;
+    const { gravyAccountNumber } = req.body;
+
+    if (!gravyAccountNumber || gravyAccountNumber.trim().length === 0) {
+        return res.status(400).json({
+            error: 'Please provide the Gravy account number of the person you referred'
+        });
+    }
+
+    const accountNum = gravyAccountNumber.trim();
+
+    try {
+        // Get the referrer (the person making the claim)
+        const referrerResult = await pool.query(
+            'SELECT * FROM users WHERE telegram_id = $1',
+            [telegramId]
+        );
+
+        if (referrerResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Your account not found. Please register first.' });
+        }
+
+        const referrer = referrerResult.rows[0];
+
+        // Referrer must be onboarded themselves
+        if (!referrer.is_onboarded) {
+            return res.status(400).json({
+                error: 'You must verify your own Gravy account before claiming referrals.'
+            });
+        }
+
+        // Check if this Gravy account is the referrer's own account
+        if (referrer.gravy_account_number === accountNum) {
+            return res.status(400).json({
+                error: 'You cannot claim your own account as a referral.'
+            });
+        }
+
+        // Check if this Gravy account is already linked to an onboarded user
+        const existingUser = await pool.query(
+            'SELECT id, is_onboarded, referred_by, first_name, last_name FROM users WHERE gravy_account_number = $1',
+            [accountNum]
+        );
+
+        if (existingUser.rows.length > 0) {
+            const existing = existingUser.rows[0];
+            if (existing.is_onboarded) {
+                // Already onboarded — check if this referrer is their referrer
+                if (existing.referred_by === referrer.id) {
+                    return res.status(400).json({
+                        error: `${existing.first_name || 'This user'} is already verified and linked to you. Earnings were already distributed.`
+                    });
+                } else if (existing.referred_by) {
+                    return res.status(400).json({
+                        error: `This account is already verified and linked to another referrer.`
+                    });
+                } else {
+                    // Onboarded but no referrer — link them to this referrer
+                    await pool.query(
+                        'UPDATE users SET referred_by = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+                        [referrer.id, existing.id]
+                    );
+                    await registerReferralChain(existing.id, referrer.id);
+                    const earnings = await distributeEarnings(existing.id);
+
+                    return res.json({
+                        success: true,
+                        message: `${existing.first_name || 'User'} has been linked to you! ₦${earnings.reduce((sum, e) => sum + e.amount, 0)} earned.`,
+                        userName: existing.first_name || 'User',
+                        earningsDistributed: earnings.length
+                    });
+                }
+            }
+        }
+
+        // Verify the Gravy account via Paystack
+        const verification = await verifyOnboarding(accountNum);
+
+        if (!verification.verified) {
+            return res.status(400).json({
+                error: verification.error || 'This Gravy account could not be verified. Make sure the person has completed onboarding on Gravy Mobile.'
+            });
+        }
+
+        // Extract the verified name
+        let verifiedFirstName = 'Gravy User';
+        let verifiedLastName = '';
+        if (verification.accountData && verification.accountData.fullName) {
+            const nameParts = verification.accountData.fullName.split(' ');
+            if (nameParts.length >= 2) {
+                verifiedFirstName = nameParts[0];
+                verifiedLastName = nameParts.slice(1).join(' ');
+            } else if (nameParts.length === 1) {
+                verifiedFirstName = nameParts[0];
+            }
+        }
+
+        let claimedUserId;
+
+        if (existingUser.rows.length > 0) {
+            // User exists in DB but wasn't onboarded yet — update them
+            const existing = existingUser.rows[0];
+            await pool.query(
+                `UPDATE users
+                 SET is_onboarded = TRUE,
+                     gravy_account_number = $1,
+                     first_name = $2,
+                     last_name = $3,
+                     referred_by = $4,
+                     onboarding_verified_at = CURRENT_TIMESTAMP,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE id = $5`,
+                [accountNum, verifiedFirstName, verifiedLastName, referrer.id, existing.id]
+            );
+            claimedUserId = existing.id;
+
+            // Register referral chain if not already linked
+            if (!existing.referred_by) {
+                await registerReferralChain(existing.id, referrer.id);
+            }
+        } else {
+            // No user exists for this account — create a "claimed" user record
+            let newReferralCode;
+            let codeExists = true;
+            while (codeExists) {
+                newReferralCode = generateReferralCode();
+                const check = await pool.query(
+                    'SELECT id FROM users WHERE referral_code = $1',
+                    [newReferralCode]
+                );
+                codeExists = check.rows.length > 0;
+            }
+
+            // Generate a unique negative telegram_id for claimed users (they never opened the bot)
+            // Use negative timestamp to guarantee uniqueness and distinguish from real Telegram IDs
+            const claimedTelegramId = -Date.now();
+
+            const insertResult = await pool.query(
+                `INSERT INTO users (telegram_id, first_name, last_name, referral_code, referred_by,
+                                    gravy_account_number, is_onboarded, onboarding_verified_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, TRUE, CURRENT_TIMESTAMP)
+                 RETURNING *`,
+                [
+                    claimedTelegramId,
+                    verifiedFirstName,
+                    verifiedLastName,
+                    newReferralCode,
+                    referrer.id,
+                    accountNum
+                ]
+            );
+
+            claimedUserId = insertResult.rows[0].id;
+            await registerReferralChain(claimedUserId, referrer.id);
+        }
+
+        // Log the verification
+        await pool.query(
+            `INSERT INTO onboarding_verifications
+             (user_id, gravy_account_number, api_response_status, api_response_body, verified)
+             VALUES ($1, $2, $3, $4, $5)`,
+            [
+                claimedUserId,
+                accountNum,
+                'success',
+                verification.apiResponse ? JSON.stringify(verification.apiResponse) : null,
+                true
+            ]
+        );
+
+        // Distribute earnings
+        const earnings = await distributeEarnings(claimedUserId);
+        const totalEarned = earnings.reduce((sum, e) => sum + e.amount, 0);
+
+        // Refresh referrer data
+        const updatedReferrer = await pool.query(
+            'SELECT * FROM users WHERE id = $1',
+            [referrer.id]
+        );
+
+        return res.json({
+            success: true,
+            message: `${verifiedFirstName} ${verifiedLastName} verified! You earned ₦${totalEarned} from this referral.`,
+            userName: `${verifiedFirstName} ${verifiedLastName}`.trim(),
+            earningsDistributed: earnings.length,
+            totalEarned,
+            user: formatUserResponse(updatedReferrer.rows[0])
+        });
+
+    } catch (error) {
+        console.error('[Auth] Claim referral error:', error);
+        return res.status(500).json({
+            error: 'Failed to verify referral. Please try again later.'
+        });
+    }
+});
+
+/**
  * GET /api/auth/me
  * Get current user's profile
  */
