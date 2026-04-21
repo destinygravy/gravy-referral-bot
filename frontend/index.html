@@ -1583,14 +1583,19 @@
         try {
             const data = await apiCall(`/leaderboard?period=${period}&limit=20`);
             if (data.success) {
-                // Show user's rank
+                // Show user's rank and period-specific earnings
                 if (data.myRank) {
                     document.getElementById('myRankCard').style.display = 'flex';
                     document.getElementById('myRankDisplay').textContent = '#' + data.myRank;
                     document.getElementById('statRank').textContent = '#' + data.myRank;
-                    if (currentUser) {
-                        document.getElementById('myRankEarnings').textContent = formatMoney(currentUser.totalEarned);
-                    }
+                    // Use period-specific earnings from API, fallback to all-time
+                    const periodEarnings = data.myEarned != null ? data.myEarned : (currentUser ? currentUser.totalEarned : 0);
+                    document.getElementById('myRankEarnings').textContent = formatMoney(periodEarnings);
+                } else {
+                    // User has no earnings in this period
+                    document.getElementById('myRankCard').style.display = 'flex';
+                    document.getElementById('myRankDisplay').textContent = '-';
+                    document.getElementById('myRankEarnings').textContent = '0.00';
                 }
 
                 const container = document.getElementById('leaderboardList');
